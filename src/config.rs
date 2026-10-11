@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Where one running August lives: its home (files under `~/.august`), the workspace its
-/// tools operate in, and the environment it takes overrides from (`AUGUST_PROVIDER`, ...).
+/// tools operate in, and the process environment (API keys extensions name, ...).
 #[derive(Clone)]
 pub struct Root(Arc<RootInner>);
 
@@ -49,11 +49,6 @@ impl Root {
     /// An environment variable, unless unset or empty.
     pub fn env(&self, key: &str) -> Option<String> {
         self.0.env.get(key).filter(|v| !v.is_empty()).cloned()
-    }
-
-    /// Whether `key` is set at all (even empty).
-    pub fn env_set(&self, key: &str) -> bool {
-        self.0.env.contains_key(key)
     }
 }
 

@@ -1,4 +1,4 @@
-//! The active model: provider, model and effort from env vars or `august.json`. Every
+//! The active model: provider, model and effort from `august.json`. Every
 //! provider lives in an extension and is reached through `remote`.
 
 use crate::config::{Config, Root};
@@ -14,16 +14,13 @@ pub struct Selection {
     pub effort: String,
 }
 
-/// `AUGUST_PROVIDER` / `AUGUST_MODEL` / `AUGUST_EFFORT`, then `august.json`.
+/// The selection saved in `august.json`.
 pub fn selection(root: &Root) -> Result<Selection> {
     let cfg: Config = root.app()?;
-    let provider = root.env("AUGUST_PROVIDER").or(cfg.provider.clone()).unwrap_or_default();
-    // A model saved for another provider must not leak into an env-selected one.
-    let cfg_model = cfg.model.filter(|_| cfg.provider.as_deref() == Some(provider.as_str()));
     Ok(Selection {
-        model: if root.env_set("AUGUST_MODEL") { root.env("AUGUST_MODEL") } else { cfg_model }.unwrap_or_default(),
-        provider,
-        effort: root.env("AUGUST_EFFORT").or(cfg.effort).unwrap_or_else(|| "medium".into()),
+        provider: cfg.provider.unwrap_or_default(),
+        model: cfg.model.unwrap_or_default(),
+        effort: cfg.effort.unwrap_or_else(|| "medium".into()),
     })
 }
 
