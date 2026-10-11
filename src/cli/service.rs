@@ -109,6 +109,19 @@ pub fn start() -> Result<()> {
         run(Command::new("launchctl").args(["bootstrap", &domain]).arg(&file))?;
         run(Command::new("launchctl").args(["kickstart", &target]))?;
     } else {
+        // Without linger the user's systemd stops at logout, and on a server it may not be
+        // running at all. Most systems allow it without sudo.
+        let linger = Command::new("loginctl").arg("enable-linger").output().is_ok_and(|o| o.status.success());
+        if !user_systemd() {
+            // WSL without systemd, a container, ...: no service, so on its own.
+            spawn()?;
+            println!("august is running in the background (no systemd here: it won't start at login or restart on crash)");
+            if !linger {
+                println!("on a server, `sudo loginctl enable-linger $USER` may start it; then run `august serve` again");
+            }
+            println!("logs: {}   (august logs)\nstop: august stop", log.display());
+            return Ok(());
+        }
         let unit = format!(
             "[Unit]\nDescription=August agent\nAfter=network-online.target\nWants=network-online.target\n\n\
              [Service]\nExecStart=\"{exe}\" gateway\nWorkingDirectory={dir}\nEnvironment=\"PATH={path}\"\nEnvironment=\"AUGUST_HOME={home}\"\n\
@@ -125,11 +138,28 @@ pub fn start() -> Result<()> {
         run(Command::new("systemctl").args(["--user", "daemon-reload"]))?;
         run(Command::new("systemctl").args(["--user", "enable", "--now", UNIT]))?;
         run(Command::new("systemctl").args(["--user", "restart", UNIT]))?;
-        println!("to keep it running after logout: loginctl enable-linger $USER");
+        if !linger {
+            println!("to keep it running after logout: sudo loginctl enable-linger $USER");
+        }
     }
     println!("august is running in the background (starts at login, restarts on crash)");
     println!("logs: {}   (august logs)\nstop: august stop", log.display());
     Ok(())
+}
+
+/// Whether `systemctl --user` reaches a running systemd. Waits a little: one that linger
+/// has just started may not be up yet.
+fn user_systemd() -> bool {
+    for _ in 0..15 {
+        let Ok(out) = Command::new("systemctl").args(["--user", "is-system-running"]).output() else {
+            return false;
+        };
+        if matches!(String::from_utf8_lossy(&out.stdout).trim(), "running" | "degraded" | "starting" | "initializing") {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    false
 }
 
 /// Starts the installed service again.
