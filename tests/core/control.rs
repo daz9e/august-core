@@ -10,8 +10,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 /// One request on the control socket; its reply.
 async fn ask(core: &Core, req: Value) -> Value {
-    let stream = tokio::net::UnixStream::connect(socket_in(&core.home)).await.unwrap();
-    let (read, mut write) = stream.into_split();
+    let stream = august_ext::os::connect(&socket_in(&core.home)).await.unwrap();
+    let (read, mut write) = tokio::io::split(stream);
     write.write_all(format!("{req}\n").as_bytes()).await.unwrap();
     let line = tokio::io::BufReader::new(read).lines().next_line().await.unwrap().unwrap();
     serde_json::from_str(&line).unwrap()

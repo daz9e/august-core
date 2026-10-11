@@ -415,6 +415,7 @@ impl Builder {
             for (name, script) in &self.defaults {
                 let exe = bin.join(format!("august-ext-{name}"));
                 std::fs::write(&exe, format!("#!/bin/sh\n{script}\n")).unwrap();
+                #[cfg(unix)]
                 std::fs::set_permissions(&exe, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
             }
             bin
@@ -543,7 +544,10 @@ impl Core {
         // The old one lets go of its control socket first, or the new one won't start.
         self._run.0.abort();
         let socket = august::gateway::control::socket_in(&self.home);
+        #[cfg(unix)]
         self.wait_until("the core to stop", |_| std::os::unix::net::UnixStream::connect(&socket).is_err()).await;
+        #[cfg(windows)]
+        self.wait_until("the core to stop", |_| std::fs::OpenOptions::new().read(true).write(true).open(&socket).is_err()).await;
         let (gw, messenger, run) = self.parts.launch(&self.pumps);
         (self.gw, self.messenger, self._run) = (gw, messenger, run);
         self.wait_until("the core to start again", |c| c.messenger.bus.lock().unwrap().is_some()).await;
