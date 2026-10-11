@@ -189,6 +189,7 @@ async fn context_hook_changes_what_the_model_sees_but_not_the_history() {
 }
 
 #[tokio::test]
+#[cfg_attr(windows, ignore = "the default extension is a #!/bin/sh script, not an .exe")]
 async fn the_users_extensions_replace_default_tools() {
     let edit = ready_script(json!({"tools": [{"name": "edit", "description": "Edit a file", "parameters": {"type": "object"}}]}));
     let core = core()

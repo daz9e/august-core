@@ -79,6 +79,7 @@ fn alive(pid: &str) -> bool {
 }
 
 #[tokio::test]
+#[cfg_attr(windows, ignore = "the extension is a sh script, checked with kill")]
 async fn processes_an_extension_started_die_with_it() {
     let script = format!("sleep 600 & echo $! > child.txt; {}", ready_script(json!({})));
     let core = core().sh("parent", &script).start().await;
