@@ -527,8 +527,17 @@ async fn extensions_have_settings_the_user_sets_and_secrets_stay_hidden() {
     assert_eq!(shown, "••••");
     user("extensions.weather.settings.city", json!("Paris")).await.unwrap();
     chat.ask("/weather", "weather for Paris with abc123").await;
-    let file = std::fs::read_to_string(core.path("config/extensions/weather.json")).unwrap();
-    assert!(file.contains("abc123") && file.contains("Paris"), "{file}");
+    // A secret is kept with the extension's secrets, not in its settings file.
+    let file = || std::fs::read_to_string(core.path("config/extensions/weather.json")).unwrap();
+    assert!(file().contains("Paris") && !file().contains("abc123"), "{}", file());
+    assert!(std::fs::read_to_string(core.path("secrets/weather.json")).unwrap().contains("abc123"));
+    // One written into the file by hand (`august config`) moves out once read.
+    let mut unit: Value = serde_json::from_str(&file()).unwrap();
+    unit["settings"]["api_key"] = json!("typed");
+    std::fs::write(core.path("config/extensions/weather.json"), unit.to_string()).unwrap();
+    chat.ask("/weather", "weather for Paris with typed").await;
+    assert!(!file().contains("typed"), "{}", file());
+    user("extensions.weather.settings.api_key", json!("abc123")).await.unwrap();
 
     // Another extension with `config` reads settings with secrets masked, and can't turn
     // extensions off.

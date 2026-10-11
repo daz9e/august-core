@@ -163,7 +163,8 @@ pub async fn open(name: &str, args: &[String]) -> Result<()> {
 }
 
 /// `august config <path> [value]`: shows (secrets included: it's the owner's terminal) or
-/// changes a setting; `null` deletes it. Takes effect when August next reads it (a running
+/// changes a setting; `null` deletes it. A setting an extension marks secret moves to its
+/// secrets once August reads it, and is no longer shown here. Takes effect when August next reads it (a running
 /// August: on restart, or right away for what it reads on each use).
 pub fn config_command(path: Option<&str>, value: Option<&str>) -> Result<()> {
     let root = config::Root::new(config::home(), Default::default(), Default::default());

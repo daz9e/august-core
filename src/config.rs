@@ -4,7 +4,7 @@
 //! ```text
 //! config/august.json               provider, model, effort, home thread, workspace
 //! config/extensions/<name>.json    enabled, origin, settings
-//! secrets/<name>.json              an extension's secrets: API keys of accounts, tokens
+//! secrets/<name>.json              an extension's secrets: keys, tokens, settings marked secret
 //! ```
 
 use anyhow::{Context, Result};
@@ -106,8 +106,6 @@ pub fn app_schema() -> serde_json::Value {
 /// Kinds of units with a file each under `config/<kind>/`.
 pub const KINDS: [&str; 1] = ["extensions"];
 
-/// Fields whose values are secrets wherever they appear: shown as `••••`.
-const SECRET_FIELDS: [&str; 5] = ["key", "token", "api_key", "password", "secret"];
 pub const MASK: &str = "••••";
 
 /// `config/<kind>/<id>.json` relative to the config folder; `august.json` for `august`.
@@ -244,24 +242,22 @@ impl Root {
     }
 }
 
-/// `value` with secrets shown as `••••`: the usual secret field names, and `extra` ones
-/// (an extension's schema marks its own).
-pub fn masked(value: &serde_json::Value, extra: &[String]) -> serde_json::Value {
+/// `value` with the fields named `secret` (those a schema marks) shown as `••••`.
+pub fn masked(value: &serde_json::Value, secret: &[String]) -> serde_json::Value {
     match value {
         serde_json::Value::Object(o) => o
             .iter()
             .map(|(k, v)| {
-                let secret = SECRET_FIELDS.contains(&k.as_str()) || extra.contains(k);
-                let shown = if secret && !v.is_null() && v != "" { MASK.into() } else { masked(v, extra) };
+                let shown = if secret.contains(k) && !v.is_null() && v != "" { MASK.into() } else { masked(v, secret) };
                 (k.clone(), shown)
             })
             .collect(),
-        serde_json::Value::Array(a) => a.iter().map(|v| masked(v, extra)).collect(),
+        serde_json::Value::Array(a) => a.iter().map(|v| masked(v, secret)).collect(),
         other => other.clone(),
     }
 }
 
 /// Whether the last segment of `path` names a secret.
-pub fn is_secret_path(path: &str, extra: &[String]) -> bool {
-    path.rsplit('.').next().is_some_and(|k| SECRET_FIELDS.contains(&k) || extra.iter().any(|e| e == k))
+pub fn is_secret_path(path: &str, secret: &[String]) -> bool {
+    path.rsplit('.').next().is_some_and(|k| secret.iter().any(|e| e == k))
 }

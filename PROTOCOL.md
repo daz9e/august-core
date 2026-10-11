@@ -182,7 +182,7 @@ Every field is optional except `protocol`; a missing `protocol` counts as 1 and 
 | `needs` | `[permission]` | the permissions it uses (§4) |
 | `timeouts` | `{event: ms}` | its own timeout per hooked event, overriding the defaults (§5.1) |
 | `sections` | `[{name, text}]` | Markdown sections added to the system prompt. Fixed for a conversation once it starts, so a change shows up from the next one. A conversation's `sections` setting keeps only the ones it names. |
-| `settings` | JSON Schema | its settings (`config/extensions/<name>.json` → `settings`); properties with `"secret": true` are shown masked; `default`s are filled in by the `settings` operation |
+| `settings` | JSON Schema | its settings (`config/extensions/<name>.json` → `settings`); properties with `"secret": true` are kept with its secrets (`secret_*` key `settings.<field>`), not in the file, and shown masked; `default`s are filled in by the `settings` operation |
 | `emits` | `[{name, description, schema, observe}]` | events it emits, hooked by others as `<name>:<event>` (§7.8) |
 | `replaces` | `[extension]` | extensions whose event namespace it takes over (§7.8) |
 | `takes` | `[job]` | jobs of the core it does instead (§8): `render`, `secrets` |

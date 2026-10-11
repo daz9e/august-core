@@ -447,17 +447,21 @@ impl Gateway {
                 self.publish_commands().await;
                 self.ext.list()
             }
-            "settings" => {
-                extensions::with_defaults(&self.ext.settings_schema(ext), &self.root().unit("extensions", ext)?["settings"])
-            }
+            "settings" => extensions::with_defaults(&self.ext.settings_schema(ext), &self.settings_of(ext).await?),
             "settings_set" => {
                 let path = format!("extensions.{}.settings.{}", ext, arg("path")?);
                 self.set_config(&path, p["value"].clone()).await?;
                 Value::Null
             }
-            "config_list" => Value::Array(self.config_list(p["prefix"].as_str().unwrap_or(""))?),
+            "config_list" => Value::Array(self.config_list(p["prefix"].as_str().unwrap_or("")).await?),
             "config_get" => {
-                let (path, value) = (arg("path")?, self.root().get(arg("path")?)?);
+                let path = arg("path")?;
+                let value = match crate::config::split_path(path)? {
+                    (kind, id, inner) if kind == "extensions" && inner.first().is_some_and(|f| f == "settings") => {
+                        inner[1..].iter().fold(self.settings_of(&id).await?, |v, k| v[k].clone())
+                    }
+                    _ => self.root().get(path)?,
+                };
                 let secret = self.secret_fields(path);
                 match crate::config::is_secret_path(path, &secret) && !value.is_null() {
                     true => json!(crate::config::MASK),
@@ -522,6 +526,25 @@ impl Gateway {
         }
     }
 
+    /// Extension `name`'s settings as stored, with the fields its schema marks `"secret": true`
+    /// read from its secrets. Such fields found in the file (set with `august config`, or kept
+    /// there before) move to its secrets first.
+    async fn settings_of(&self, name: &str) -> Result<Value> {
+        let mut settings = self.root().get(&format!("extensions.{name}.settings"))?;
+        if !settings.is_object() {
+            settings = json!({});
+        }
+        for field in extensions::secret_fields(&self.ext.settings_schema(name)) {
+            let key = format!("settings.{field}");
+            if let Some(v) = settings.get(&field).filter(|v| !v.is_null()) {
+                self.secret(name, &key, Some(Some(&v.to_string()))).await?;
+                self.root().set(&format!("extensions.{name}.settings.{field}"), Value::Null)?;
+            }
+            settings[&field] = self.secret(name, &key, None).await?.as_str().and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+        }
+        Ok(settings)
+    }
+
     /// Secret field names under `path`: those an extension's schema marks.
     fn secret_fields(&self, path: &str) -> Vec<String> {
         match crate::config::split_path(path) {
@@ -531,11 +554,14 @@ impl Gateway {
     }
 
     /// Every setting a schema describes or a file holds: August's own, then each extension's.
-    fn config_list(&self, prefix: &str) -> Result<Vec<Value>> {
+    async fn config_list(&self, prefix: &str) -> Result<Vec<Value>> {
         let mut units = vec![("august".to_string(), crate::config::app_schema(), self.root().unit("august", "")?)];
         for e in self.ext.list().as_array().into_iter().flatten() {
             let name = e["name"].as_str().unwrap_or_default();
-            units.push((format!("extensions.{name}.settings"), self.ext.settings_schema(name), self.root().get(&format!("extensions.{name}.settings"))?));
+            let unit = format!("extensions.{name}.settings");
+            if unit.starts_with(prefix) || prefix.starts_with(unit.as_str()) {
+                units.push((unit, self.ext.settings_schema(name), self.settings_of(name).await?));
+            }
         }
         let mut out = Vec::new();
         for (unit, schema, values) in units.into_iter().filter(|(u, ..)| u.starts_with(prefix) || prefix.starts_with(u.as_str())) {
@@ -557,8 +583,24 @@ impl Gateway {
     }
 
     /// Changes a setting and tells extensions (`config_changed {path}`).
+    /// A field an extension's schema marks secret is kept with its secrets, never in the file.
     pub(super) async fn set_config(&self, path: &str, value: Value) -> Result<()> {
-        self.root().set(path, value)?;
+        match crate::config::split_path(path)? {
+            (kind, id, inner) if kind == "extensions" && inner.first().is_some_and(|f| f == "settings") => {
+                match inner.get(1).filter(|f| inner.len() == 2 && extensions::secret_fields(&self.ext.settings_schema(&id)).contains(f)) {
+                    Some(field) => {
+                        let value = (!value.is_null()).then(|| value.to_string());
+                        self.secret(&id, &format!("settings.{field}"), Some(value.as_deref())).await?;
+                    }
+                    None => {
+                        self.root().set(path, value)?;
+                        // A whole object may hold secret fields: they move out of the file.
+                        self.settings_of(&id).await?;
+                    }
+                }
+            }
+            _ => self.root().set(path, value)?,
+        }
         if self.ext.listens("config_changed") {
             let ext = self.ext.clone();
             let data = json!({"path": path});
