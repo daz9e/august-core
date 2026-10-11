@@ -241,7 +241,10 @@ async fn hooks_watch_extensions_launch_and_can_block_change_or_limit_them() {
 
     // Its exit hook keeps the crashed one down: no restart, however long we wait.
     let pid = core.extension("weather").await["pid"].to_string();
+    #[cfg(unix)]
     std::process::Command::new("kill").args(["-9", &pid]).status().unwrap();
+    #[cfg(windows)]
+    std::process::Command::new("taskkill").args(["/F", "/PID", &pid]).status().unwrap();
     settle(1_500).await;
     let state = core.extension("weather").await;
     assert!(state["state"] == "failed" && state["error"].as_str().unwrap().starts_with("crashed"), "{state}");
