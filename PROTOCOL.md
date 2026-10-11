@@ -277,7 +277,7 @@ where the call comes from:
 ```json
 {"thread": {"messenger": "telegram", "id": "123"},
  "turn": {"id": 42, "conversation": "thread", "show": true, "source": "ext:goal", "parent": 7, "meta": {}},
- "depth": 0}
+ "depth": 0, "user": {"id": "55", "name": "Pavel"}}
 ```
 
 - `thread`: the thread the call belongs to, or `null` (e.g. a lifecycle event).
@@ -292,6 +292,9 @@ where the call comes from:
   `source`, `parent` and `meta` are left out when empty.
 - `depth`: how many extension-emitted events the call is nested in. Pass it back with `emit`
   (§7.8).
+- `user`: the person whose message, command or reaction caused the call, as the messenger
+  reported them (§9.1): set on `message_in`, `message_edited`, `reaction` and `command`
+  from a messenger, else `null`. Turns and their hooks don't carry it.
 
 When calling August *from inside* such a call, pass `ctx.thread` as `thread`, and
 `ctx.turn.id` as `from_turn`. Then the hooks of what you run see the same turn, and

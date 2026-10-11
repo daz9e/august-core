@@ -16,7 +16,7 @@ use crate::config::Root;
 use crate::db::Db;
 use crate::extensions::{self, Extensions};
 pub use crate::extensions::{Io, Link};
-use crate::messengers::{Inbound, InboundKind, Messenger, OutMessage, Thread};
+use crate::messengers::{Inbound, InboundKind, Messenger, OutMessage, Thread, User};
 use crate::llm::{Block, LlmProvider};
 use crate::llm::providers;
 use crate::tools::ToolRegistry;
@@ -209,11 +209,11 @@ impl Gateway {
 
     /// Runs the `message_in` hook on a message for `thread`: its data as the hooks left it, or
     /// `None` when one handled it (its reply, if any, is sent).
-    async fn message_in(&self, channel: &Arc<dyn Messenger>, thread: &Thread, data: Value) -> Result<Option<Value>> {
+    async fn message_in(&self, channel: &Arc<dyn Messenger>, thread: &Thread, user: Option<User>, data: Value) -> Result<Option<Value>> {
         if !self.ext.listens("message_in") {
             return Ok(Some(data));
         }
-        let data = self.ext.emit("message_in", data, &extensions::Origin::thread(thread.clone())).await;
+        let data = self.ext.emit("message_in", data, &extensions::Origin { thread: Some(thread.clone()), user, ..Default::default() }).await;
         if data["handled"] == true {
             if let Some(reply) = data["reply"].as_str().filter(|r| !r.is_empty()) {
                 channel.send(&thread.id, &OutMessage::text(reply)).await?;
@@ -231,7 +231,8 @@ impl Gateway {
     /// `ext:goal`. The hook may change its text, add `images` (`[{path, mime}]`) or its
     /// `deliver`: `steer` joins the running turn or starts one, `followUp` runs as its own
     /// turn after the current one, `nextTurn` waits for the next turn without starting one.
-    pub(super) async fn deliver(self: &Arc<Self>, channel: Arc<dyn Messenger>, thread: Thread, mut message: Value) -> Result<()> {
+    /// `user`: who wrote it, for the hooks' `ctx`.
+    pub(super) async fn deliver(self: &Arc<Self>, channel: Arc<dyn Messenger>, thread: Thread, user: Option<User>, mut message: Value) -> Result<()> {
         let state = self.chat(&thread).await?;
         let intake = state.intake.lock().await;
         let deliver = message["deliver"].as_str().unwrap_or("steer").to_string();
@@ -244,7 +245,7 @@ impl Gateway {
         if message["files"].is_null() {
             message["files"] = serde_json::json!([]);
         }
-        let Some(data) = self.message_in(&channel, &thread, message).await? else {
+        let Some(data) = self.message_in(&channel, &thread, user, message).await? else {
             return Ok(());
         };
         // ponytail: what isn't addressed is dropped, not kept as context; stash it for the
@@ -292,17 +293,17 @@ impl Gateway {
         match ev.kind {
             // A button of a question nobody waits for any more.
             InboundKind::Press { .. } => {}
-            InboundKind::Command { name, args } => self.command(&channel, &ev.thread, &name, &args).await?,
+            InboundKind::Command { name, args } => self.command(&channel, &ev.thread, ev.user, &name, &args).await?,
             InboundKind::Reaction { message, emoji } => {
                 if self.ext.listens("reaction") {
                     let data = serde_json::json!({"message": message, "emoji": emoji});
-                    self.ext.emit("reaction", data, &extensions::Origin::thread(ev.thread.clone())).await;
+                    self.ext.emit("reaction", data, &extensions::Origin::from(ev.thread.clone(), ev.user)).await;
                 }
             }
             InboundKind::Edited { id, text } => {
                 if self.ext.listens("message_edited") {
                     let data = serde_json::json!({"id": id, "text": text});
-                    self.ext.emit("message_edited", data, &extensions::Origin::thread(ev.thread.clone())).await;
+                    self.ext.emit("message_edited", data, &extensions::Origin::from(ev.thread.clone(), ev.user)).await;
                 }
             }
             InboundKind::Message { text, files, .. } if text.is_empty() && files.is_empty() => {}
@@ -311,7 +312,7 @@ impl Gateway {
                     "id": message, "text": text, "files": files, "source": "user", "deliver": "steer",
                     "reply_to": reply_to, "addressed": addressed, "place": ev.place,
                 });
-                self.deliver(channel, ev.thread, message).await?;
+                self.deliver(channel, ev.thread, Some(ev.user), message).await?;
             }
         }
         Ok(())

@@ -13,7 +13,7 @@ pub use host::{AccountInfo, ProviderInfo, RpcError};
 
 use crate::config::Root;
 use crate::llm::ToolSpec;
-use crate::messengers::Thread;
+use crate::messengers::{Thread, User};
 use anyhow::Result;
 use async_trait::async_trait;
 use host::{Exit, Host};
@@ -58,11 +58,16 @@ pub struct Origin {
     pub turn: Option<crate::agent::TurnTag>,
     /// How many extension events this call is nested in.
     pub depth: u32,
+    /// The person whose message, command or reaction caused the call.
+    pub user: Option<User>,
 }
 
 impl Origin {
     pub fn thread(thread: Thread) -> Self {
         Self { thread: Some(thread), ..Default::default() }
+    }
+    pub fn from(thread: Thread, user: User) -> Self {
+        Self { thread: Some(thread), user: Some(user), ..Default::default() }
     }
 }
 
@@ -1302,6 +1307,7 @@ fn ctx_json(origin: &Origin) -> Value {
         "thread": origin.thread.as_ref().map(|t| json!({"messenger": t.messenger, "id": t.id})),
         "turn": origin.turn,
         "depth": origin.depth,
+        "user": origin.user,
     })
 }
 

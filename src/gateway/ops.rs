@@ -215,7 +215,7 @@ impl Gateway {
                 let gw = self.clone();
                 // Not awaited: the caller may be inside a turn of that very thread.
                 tokio::spawn(async move {
-                    if let Err(e) = gw.deliver(m, t, message).await {
+                    if let Err(e) = gw.deliver(m, t, None, message).await {
                         eprintln!("gateway: {e:#}");
                     }
                 });
@@ -451,7 +451,7 @@ impl Gateway {
             }
             "emit" => {
                 let turn = p["from_turn"].as_u64().and_then(|id| self.turns.tag(id));
-                let origin = extensions::Origin { thread: thread(p).ok(), turn, depth: p["depth"].as_u64().unwrap_or(0) as u32 };
+                let origin = extensions::Origin { thread: thread(p).ok(), turn, depth: p["depth"].as_u64().unwrap_or(0) as u32, ..Default::default() };
                 self.ext.emit_own(ext, arg("event")?, p["data"].clone(), origin).await?
             }
             "store_get" => match self.db.kv_get(ext, arg("key")?)? {

@@ -117,14 +117,16 @@ async fn one_message_carries_text_button_rows_files_and_a_reply() {
     assert_eq!(card.reply_to.as_deref(), Some("in1"));
 }
 
-/// Records what `message_in` gets.
+/// Records what `message_in` gets, with who wrote it (`ctx.user`) as `user`.
 fn recorder(seen: Arc<Mutex<Vec<Value>>>) -> impl Fn(&August) + Send + Sync + 'static {
     move |a| {
         let seen = seen.clone();
-        a.on("message_in", move |d, _| {
+        a.on("message_in", move |mut d, ctx| {
+            d["user"] = json!(ctx.user);
             seen.lock().unwrap().push(d);
             async { Ok(None) }
         });
+        a.register_command("whoami", "", |_, ctx| async move { Ok(ctx.user.map(|u| format!("you are {}", u.name))) });
     }
 }
 
@@ -139,7 +141,10 @@ async fn what_comes_with_a_message_reaches_message_in_and_unaddressed_chatter_ru
     chat.wait_for("ok").await;
     let d = seen.lock().unwrap()[0].clone();
     assert_eq!((d["reply_to"]["text"].as_str(), d["reply_to"]["mine"].as_bool(), d["place"]["kind"].as_str(), d["place"]["title"].as_str()), (Some("Paris is the capital."), Some(true), Some("group"), Some("Family")));
-    assert_eq!((d["source"].as_str(), d["id"].as_str()), (Some("user"), Some("u1")));
+    assert_eq!((d["source"].as_str(), d["id"].as_str(), d["user"]["id"].as_str()), (Some("user"), Some("u1"), Some("owner")));
+    // A command knows who ran it too.
+    chat.say("/whoami");
+    chat.wait_for("you are Owner").await;
 
     // Chatter not addressed to August reaches hooks, but runs nothing.
     chat.send_at(group, InboundKind::Message { id: "u2".into(), text: "lunch?".into(), files: vec![], reply_to: None, addressed: false });

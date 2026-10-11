@@ -3,7 +3,7 @@
 
 use super::Gateway;
 use crate::extensions::Origin;
-use crate::messengers::{CommandSpec, Messenger, OutMessage, Thread};
+use crate::messengers::{CommandSpec, Messenger, OutMessage, Thread, User};
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -30,9 +30,9 @@ impl Gateway {
         }
     }
 
-    pub(super) async fn command(&self, channel: &Arc<dyn Messenger>, id: &Thread, name: &str, args: &str) -> Result<()> {
+    pub(super) async fn command(&self, channel: &Arc<dyn Messenger>, id: &Thread, user: User, name: &str, args: &str) -> Result<()> {
         let chat = id.id.as_str();
-        let reply = match self.ext.run_command(name, args, &Origin::thread(id.clone())).await {
+        let reply = match self.ext.run_command(name, args, &Origin::from(id.clone(), user)).await {
             Some(Ok(Some(reply))) => Some(reply),
             Some(Ok(None)) => None,
             Some(Err(e)) => Some(format!("⚠️ /{name} failed: {e}")),

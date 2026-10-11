@@ -251,6 +251,8 @@ pub struct Ctx {
     pub thread: Option<Thread>,
     /// The turn it runs in.
     pub turn: Option<Turn>,
+    /// The person whose message, command or reaction caused the call.
+    pub user: Option<messenger::User>,
     /// How many extension events this call is nested in (sent back with `emit`).
     depth: u64,
     /// The id of the request being served.
@@ -976,8 +978,9 @@ impl August {
                 let task = tokio::spawn(async move {
                     let thread = serde_json::from_value(msg["params"]["ctx"]["thread"].clone()).ok();
                     let turn = serde_json::from_value(msg["params"]["ctx"]["turn"].clone()).ok();
+                    let user = serde_json::from_value(msg["params"]["ctx"]["user"].clone()).ok();
                     let depth = msg["params"]["ctx"]["depth"].as_u64().unwrap_or(0);
-                    let ctx = Ctx { link: link.clone(), thread, turn, depth, request: id.unwrap_or(0) };
+                    let ctx = Ctx { link: link.clone(), thread, turn, user, depth, request: id.unwrap_or(0) };
                     let reply = match me.handle(&method, &msg["params"], ctx).await {
                         Ok(result) => json!({"id": msg["id"], "result": result}),
                         Err(e) => {
