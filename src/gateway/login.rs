@@ -202,9 +202,9 @@ fn query_of(url: &str) -> Result<Value> {
     Ok(Value::Object(url.query_pairs().map(|(k, v)| (k.into_owned(), Value::String(v.into_owned()))).collect()))
 }
 
-/// Opens `url` in this machine's browser (best effort; `AUGUST_OPEN_BROWSER=0`: never).
+/// Opens `url` in this machine's browser (best effort; never with `open_browser: false`).
 fn open_browser(root: &crate::config::Root, url: &str) {
-    if root.env("AUGUST_OPEN_BROWSER").is_some_and(|v| v == "0") {
+    if root.app().is_ok_and(|c| c.open_browser == Some(false)) {
         return;
     }
     // Not `cmd /c start`: cmd would cut the address at its first `&`.

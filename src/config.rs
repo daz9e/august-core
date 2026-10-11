@@ -2,7 +2,7 @@
 //! the user (mode 0600, secrets included):
 //!
 //! ```text
-//! config/august.json               provider, model, effort, home thread
+//! config/august.json               provider, model, effort, home thread, workspace
 //! config/extensions/<name>.json    enabled, origin, settings
 //! secrets/<name>.json              an extension's secrets: API keys of accounts, tokens
 //! ```
@@ -30,12 +30,13 @@ impl Root {
         Self(Arc::new(RootInner { home, workspace, env }))
     }
 
-    /// From the process: `home()`, `$AUGUST_WORKSPACE` (default `./workspace`, created) and
-    /// its environment.
+    /// From the process: `home()`, the workspace `august.json` names (relative to the home,
+    /// default `workspace`; created) and its environment.
     pub fn from_env() -> Result<Self> {
-        let workspace = PathBuf::from(crate::util::env_or("AUGUST_WORKSPACE", "./workspace"));
+        let root = Self::new(home(), PathBuf::new(), std::env::vars().collect());
+        let workspace = root.home().join(root.app()?.workspace.as_deref().unwrap_or("workspace"));
         std::fs::create_dir_all(&workspace)?;
-        Ok(Self::new(home(), workspace.canonicalize()?, std::env::vars().collect()))
+        Ok(Self::new(root.home().into(), workspace.canonicalize()?, root.0.env.clone()))
     }
 
     pub fn home(&self) -> &Path {
@@ -66,7 +67,8 @@ pub fn home() -> PathBuf {
 }
 
 /// August's own settings (`config/august.json`): the active provider and model, chosen
-/// with `/login` / `/model` (or `august login` / `august model`), and the home thread.
+/// with `/login` / `/model` (or `august login` / `august model`), the home thread, the
+/// workspace and whether sign-ins open the browser.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -78,6 +80,12 @@ pub struct Config {
     /// The thread extensions reach as `"home"` (`messenger:id`); set with `/home`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<String>,
+    /// The folder the agent's tools work in; relative to August's home. Read at start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// `false`: a sign-in at this machine's terminal shows its link without opening it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_browser: Option<bool>,
 }
 
 /// JSON Schema of `august.json`, in the shape extensions describe their settings with.
@@ -87,6 +95,8 @@ pub fn app_schema() -> serde_json::Value {
         "model": {"type": "string", "description": "The active model of that provider; /models lists them"},
         "effort": {"type": "string", "description": "Reasoning effort for models that have it (low, medium, high)"},
         "home": {"type": "string", "description": "The thread extensions report to (messenger:id); set with /home"},
+        "workspace": {"type": "string", "description": "The folder the agent's tools work in, relative to August's home (default: workspace); takes effect on restart"},
+        "open_browser": {"type": "boolean", "description": "Whether a sign-in at this machine's terminal opens its link in the browser (default: true)"},
         "hooks": {"type": "object", "description": "Hook chains: `order` lists extensions whose handlers run first, in that order (the rest after, by name)"},
     }})
 }
@@ -166,7 +176,7 @@ impl Root {
         // Fields this version doesn't know stay.
         let mut v = self.unit("august", "")?;
         let o = v.as_object_mut().context("august.json must be an object")?;
-        for k in ["provider", "model", "effort", "home"] {
+        for k in ["provider", "model", "effort", "home", "workspace", "open_browser"] {
             o.remove(k);
         }
         if let serde_json::Value::Object(known) = serde_json::to_value(cfg)? {
