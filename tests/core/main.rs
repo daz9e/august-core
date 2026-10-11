@@ -11,5 +11,6 @@ mod lifecycle;
 mod login;
 mod messaging;
 mod render;
+mod secrets;
 mod sessions;
 mod turns;

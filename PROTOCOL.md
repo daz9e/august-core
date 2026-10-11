@@ -19,7 +19,7 @@ Contents:
 5. [August → extension](#5-august--extension)
 6. [Extension → August: operations](#6-extension--august-operations)
 7. [Events](#7-events)
-8. [Jobs of the core: `render`](#8-jobs-of-the-core-render)
+8. [Jobs of the core: `render`, `secrets`](#8-jobs-of-the-core-render-secrets)
 9. [Messengers](#9-messengers)
 10. [Model providers](#10-model-providers)
 11. [Accounts and sign-in](#11-accounts-and-sign-in)
@@ -185,7 +185,7 @@ Every field is optional except `protocol`; a missing `protocol` counts as 1 and 
 | `settings` | JSON Schema | its settings (`config/extensions/<name>.json` → `settings`); properties with `"secret": true` are shown masked; `default`s are filled in by the `settings` operation |
 | `emits` | `[{name, description, schema, observe}]` | events it emits, hooked by others as `<name>:<event>` (§7.8) |
 | `replaces` | `[extension]` | extensions whose event namespace it takes over (§7.8) |
-| `takes` | `[job]` | jobs of the core it does instead (§8); today: `render` |
+| `takes` | `[job]` | jobs of the core it does instead (§8): `render`, `secrets` |
 | `providers` | `[{id, label, default_model}]` | model providers it offers (§10) |
 | `messengers` | `[Description]` | messengers it offers (§9) |
 | `accounts` | `[{id, label, providers, key, login}]` | accounts it signs in to (§11) |
@@ -218,7 +218,7 @@ its `needs` lists that permission; otherwise the call fails with
 | `models` | `model_set`, `providers`, `models` |
 | `sessions` | `sessions`, `session_new`, `session_update`, `session_switch`, `history`, `messages`, `messages_set`, `search` |
 | `config` | `config_list`, `config_get`, `config_set` (any unit's settings) |
-| `admin` | `extensions`, `extension_enable`, `extension_disable`, `extensions_reload`, `extension_logs`, `extension_health`, `accounts`, `login`, `logout`; and hooking `extension_launch`, `extension_ready`, `extension_exit`, `extension_output` |
+| `admin` | `extensions`, `extension_enable`, `extension_disable`, `extensions_reload`, `extension_logs`, `extension_health`, `accounts`, `login`, `logout`; hooking `extension_launch`, `extension_ready`, `extension_exit`, `extension_output`; taking `secrets` (§8) |
 | `user` | `as_user: true` on any call: it counts as the user's (§6) |
 
 **Scopes**: `messaging` and `config` may be declared for part of what they grant, as
@@ -271,7 +271,7 @@ skipped, a tool or command fails.
 | `event` `extension_launch` | 15 min |
 | `event` `extension_ready`, `extension_exit` | 5 min |
 | `event` `shutdown` | 2 s |
-| `event` `render` (§8) | 10 s, or `timeouts.render` |
+| `event` `render`, `secrets` (§8) | 10 s, or `timeouts.render`, `timeouts.secrets` |
 | `tool`, `command` | 10 min |
 | `health` | `ping_timeout_ms` (10 s) |
 | `login`, `logout` | 15 min |
@@ -444,7 +444,7 @@ ignores a `thread` it doesn't use.
 | `store_set` | `key, value` | `null`; `null` deletes |
 | `store_list` | `prefix` | `[{key, value}]` in key order |
 | `secret_get` | `key` | the string, or `null` |
-| `secret_set` | `key, value` | `null`; `null` deletes. Kept in `secrets/<name>.json` (mode 0600). |
+| `secret_set` | `key, value` | `null`; `null` deletes. Kept in `secrets/<name>.json` (mode 0600), or by the extension that takes `secrets` (§8). |
 | `journal_append` | `type, data, session?` or `thread?` | the entry's id. Recorded as kind `custom`, caller you. |
 | `emit` | `event, data, thread?, from_turn?, depth?` | §7.8 |
 
@@ -609,11 +609,15 @@ hook them as `<namespace>:<event>`, where the namespace is the extension's name.
 Emit whether anyone listens or not. Hook another extension's event only for extra
 behaviour: nothing arrives while it isn't running.
 
-## 8. Jobs of the core: `render`
+## 8. Jobs of the core: `render`, `secrets`
 
 Some things the core does only while no extension does them in its place. An extension
-takes a job with `takes`; of several, the first in `hooks.order` gets it. Today there is
-one job, `render`: drawing the user's **shown** turns in their thread.
+takes a job with `takes`; of several, the first in `hooks.order` gets it. There are two
+jobs: `render` and `secrets`.
+
+### `render`
+
+Drawing the user's **shown** turns in their thread.
 
 The taker gets `event` requests named `render` (whether or not it lists `render` in
 `events`) with `ctx.thread` and `ctx.turn`. They come **one at a time, in order**: the next
@@ -633,6 +637,26 @@ messages in `ctx.thread` itself.
 When anyone else `send`s to that thread mid-reply, August hands the renderer a `break`,
 waits for its reply, and only then sends. With nobody taking `render`, the core sends each
 turn's outcome once: the reply, `⏹ Stopped.` or `⚠️ Error: …`.
+
+### `secrets`
+
+Keeping every extension's secrets (`secret_get`, `secret_set`) somewhere other than
+`secrets/<name>.json`: encrypted, in a keychain, on a hardware key. Only an extension with
+`admin` may take it; it sees every secret.
+
+The taker gets `event` requests named `secrets`:
+
+| `data` | Reply |
+|---|---|
+| `{op: "get", extension, key}` | `{value}`: the string, or `null` |
+| `{op: "set", extension, key, value}` | anything; `value: null` deletes |
+
+`extension` is the caller, filled in by August: one extension never reaches another's
+secrets. August remembers the taker. While it starts, secret calls wait for it (up to 30 s);
+while it is disabled or down, they fail rather than fall back to the files. Once it is
+uninstalled or no longer takes the job, the files are used again. The taker keeps what it
+needs to unlock the secrets (a key file, a passphrase, a hardware key) itself, out of
+`secret_*`.
 
 ## 9. Messengers
 

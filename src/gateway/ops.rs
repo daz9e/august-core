@@ -322,11 +322,8 @@ impl Gateway {
                 self.account_update(ext, arg("account")?, arg("status")?, p["who"].as_str()).await?;
                 Value::Null
             }
-            "secret_get" => json!(self.root().secret(ext, arg("key")?)?),
-            "secret_set" => {
-                self.root().set_secret(ext, arg("key")?, p["value"].as_str())?;
-                Value::Null
-            }
+            "secret_get" => self.secret(ext, arg("key")?, None).await?,
+            "secret_set" => self.secret(ext, arg("key")?, Some(p["value"].as_str())).await?,
             "login_ask" | "login_choose" | "login_open" | "login_progress" | "login_callback" | "login_wait" => self.login_step(ext, name, p).await?,
             "sessions" => json!(self.db.sessions(thread(p).ok().map(|t| t.key()).as_deref())?),
             // A conversation of no chat, addressed as thread `{messenger: "session", id}`.
@@ -506,6 +503,23 @@ impl Gateway {
         let seen = self.activity.lock().unwrap();
         let last = seen.iter().max_by_key(|(_, at)| **at).map(|(t, _)| t.clone());
         last.ok_or_else(|| anyhow!("there is no home thread yet: send /home in the thread that should be it"))
+    }
+
+    /// Secret `key` of `ext`, or with `set` keeps (`Some(None)`: deletes) it: through the
+    /// extension that took the `secrets` job, else in `secrets/<ext>.json`.
+    async fn secret(&self, ext: &str, key: &str, set: Option<Option<&str>>) -> Result<Value> {
+        if let Some(keeper) = self.ext.secrets_keeper().await? {
+            let data = match set {
+                None => json!({"op": "get", "extension": ext, "key": key}),
+                Some(value) => json!({"op": "set", "extension": ext, "key": key, "value": value}),
+            };
+            let reply = self.ext.run_job(&keeper, "secrets", &data, &Origin::default()).await.ok_or_else(|| anyhow!("{keeper} could not keep the secret"))?;
+            return Ok(if set.is_none() { reply["value"].clone() } else { Value::Null });
+        }
+        match set {
+            None => Ok(json!(self.root().secret(ext, key)?)),
+            Some(value) => self.root().set_secret(ext, key, value).map(|_| Value::Null),
+        }
     }
 
     /// Secret field names under `path`: those an extension's schema marks.

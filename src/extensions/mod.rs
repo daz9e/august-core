@@ -1005,6 +1005,43 @@ impl Extensions {
         hosts.into_iter().next().map(|(n, _)| n)
     }
 
+    /// The extension keeping every extension's secrets in the core's place: of those that take
+    /// `secrets` with `admin`, the first in the user's order. The one that kept them last is
+    /// waited for while it starts; one disabled or down is an error, never a fall back to the
+    /// core's files. Only once it is gone, or no longer takes the job, are they the core's again.
+    pub async fn secrets_keeper(&self) -> Result<Option<String>> {
+        let file = self.dir.join(".runtime").join("secrets-keeper");
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let mut hosts: Vec<_> = self
+                .running()
+                .into_iter()
+                .filter(|(_, h)| {
+                    let m = h.manifest();
+                    m.takes.iter().any(|t| t == "secrets") && m.needs.iter().any(|n| n == "admin")
+                })
+                .collect();
+            in_user_order(&self.root, &mut hosts);
+            if let Some((name, _)) = hosts.into_iter().next() {
+                if std::fs::read_to_string(&file).ok().as_deref() != Some(name.as_str()) {
+                    std::fs::create_dir_all(self.dir.join(".runtime"))?;
+                    std::fs::write(&file, &name)?;
+                }
+                return Ok(Some(name));
+            }
+            let Ok(kept) = std::fs::read_to_string(&file) else { return Ok(None) };
+            let state = self.slots.read().unwrap().iter().find(|s| s.name == kept).map(|s| s.state.clone());
+            match state {
+                Some(State::Starting) if std::time::Instant::now() < deadline => tokio::time::sleep(Duration::from_millis(100)).await,
+                Some(State::Starting | State::Failed(_) | State::Disabled) => anyhow::bail!("secrets are kept by {kept}, which isn't running"),
+                Some(State::Running(_)) | None => {
+                    std::fs::remove_file(&file).ok();
+                    return Ok(None);
+                }
+            }
+        }
+    }
+
     /// Hands extension `name` the `event` of a job it took and waits for its handler; `None`
     /// when it isn't running or failed.
     pub async fn run_job(&self, name: &str, event: &str, data: &Value, chat: &Origin) -> Option<Value> {
