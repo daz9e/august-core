@@ -12,12 +12,14 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 dotenvy = "0.15"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 getrandom = "0.3"
-libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["full"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization"] }
 
 [[bin]]
 name = "august"

@@ -6,14 +6,12 @@
 use anyhow::{Context, Result, anyhow};
 use serde_json::{Value, json};
 use std::path::Path;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
-use tokio::net::UnixStream;
-use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, ReadHalf, WriteHalf};
 
 pub struct Client {
     token: String,
-    read: Lines<BufReader<OwnedReadHalf>>,
-    write: OwnedWriteHalf,
+    read: Lines<BufReader<ReadHalf<crate::os::Stream>>>,
+    write: WriteHalf<crate::os::Stream>,
 }
 
 impl Client {
@@ -24,8 +22,8 @@ impl Client {
     }
 
     pub async fn connect(socket: &Path, token: &str) -> Result<Client> {
-        let stream = UnixStream::connect(socket).await.with_context(|| format!("August is not running ({})", socket.display()))?;
-        let (read, write) = stream.into_split();
+        let stream = crate::os::connect(socket).await.with_context(|| format!("August is not running ({})", socket.display()))?;
+        let (read, write) = tokio::io::split(stream);
         Ok(Client { token: token.into(), read: BufReader::new(read).lines(), write })
     }
 

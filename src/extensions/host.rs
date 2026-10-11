@@ -152,9 +152,10 @@ pub struct Host {
     manifest: Arc<RwLock<Manifest>>,
     busy: Busy,
     streams: Streams,
-    /// Its process group (the process leads one), killed when the host is dropped; 0 for
-    /// an extension linked in.
+    /// Its process (0 for an extension linked in) and its group, killed when the host is
+    /// dropped.
     pid: i32,
+    group: Option<Arc<august_ext::os::Group>>,
     /// Closes the link of one linked in.
     close: Arc<Notify>,
     exited: Arc<AtomicBool>,
@@ -196,6 +197,7 @@ fn tail_text(tail: &Tail) -> String {
 /// The process behind a link, when there is one.
 struct Process {
     pid: i32,
+    group: Option<Arc<august_ext::os::Group>>,
     /// Its exit code, once it ended.
     waited: tokio::task::JoinHandle<Option<i32>>,
     /// Done once its stderr is read to the end.
@@ -216,31 +218,33 @@ impl Host {
         on_exit: Box<dyn FnOnce(Exit) + Send>,
     ) -> Result<Host, String> {
         let program = command.as_std().get_program().to_string_lossy().to_string();
-        let mut child = command
+        let mut child = august_ext::os::own_group(&mut command)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .process_group(0)
             .spawn()
             .map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => format!("`{program}` was not found: is it installed and on PATH?"),
                 _ => format!("could not run `{program}`: {e}"),
             })?;
         let pid = child.id().map_or(0, |p| p as i32);
+        let group = august_ext::os::Group::of(&child).map(Arc::new);
         log.note(&format!("started, pid {pid}"));
         let stdin = child.stdin.take().expect("piped stdin");
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
 
-        let waited = tokio::spawn(async move {
-            let code = child.wait().await.ok().and_then(|s| s.code());
-            // What it started dies with it, so a restart doesn't find the old ones running.
-            if pid > 0 {
-                // SAFETY: plain syscall on the extension's own process group; it may be gone.
-                unsafe { libc::killpg(pid, libc::SIGKILL) };
-            }
-            code
-        });
+        let waited = {
+            let group = group.clone();
+            tokio::spawn(async move {
+                let code = child.wait().await.ok().and_then(|s| s.code());
+                // What it started dies with it, so a restart doesn't find the old ones running.
+                if let Some(group) = group {
+                    group.kill();
+                }
+                code
+            })
+        };
         let tail: Tail = Arc::default();
         let stderr_done = {
             let (tail, log) = (tail.clone(), log.clone());
@@ -257,7 +261,7 @@ impl Host {
                 }
             })
         };
-        let process = Process { pid, waited, stderr_done, tail };
+        let process = Process { pid, group, waited, stderr_done, tail };
         Self::serve((Box::new(stdout), Box::new(stdin)), Some(process), name, core, log, on_exit).await
     }
 
@@ -278,6 +282,7 @@ impl Host {
     ) -> Result<Host, String> {
         let stdin: Writer = Arc::new(Mutex::new(stdin));
         let pid = process.as_ref().map_or(0, |p| p.pid);
+        let group = process.as_ref().and_then(|p| p.group.clone());
         let tail = process.as_ref().map(|p| p.tail.clone()).unwrap_or_default();
         let exited: Arc<AtomicBool> = Arc::default();
         let close: Arc<Notify> = Arc::default();
@@ -382,7 +387,7 @@ impl Host {
             });
         }
 
-        let host = Host { stdin, waiting, next_id: AtomicU64::new(1), manifest, busy, streams, pid, close, exited, stopped, limit, started: Instant::now() };
+        let host = Host { stdin, waiting, next_id: AtomicU64::new(1), manifest, busy, streams, pid, group, close, exited, stopped, limit, started: Instant::now() };
         match tokio::time::timeout(START_TIMEOUT, ready_rx).await {
             Ok(Ok(())) => {
                 let speaks = host.manifest.read().unwrap().protocol;
@@ -408,9 +413,8 @@ impl Host {
 
     /// Ends it: kills its process group, or closes the link.
     pub fn kill(&self) {
-        if self.pid > 0 {
-            // SAFETY: plain syscall; the group is the extension's own (`process_group(0)`).
-            unsafe { libc::killpg(self.pid, libc::SIGKILL) };
+        if let Some(group) = &self.group {
+            group.kill();
         } else {
             self.close.notify_one();
         }
