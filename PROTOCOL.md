@@ -386,7 +386,7 @@ ignores a `thread` it doesn't use.
 | `llm` | `llm` | `prompt` or `messages` (§10.1); `system`, `effort`, `options`, `thread?` | the reply text. One completion without tools. In a thread, it uses that conversation's model and is counted there (`llm_result`). |
 | `model_set` | `models` | `model`: `name` of the active provider, `provider:name`, or `provider:` for its default | `{provider, model}`; passes `model_select` |
 | `providers` | `models` | — | `[{id, label, default_model, extension}]` |
-| `models` | `models` | `provider?` (default: the active one) | `[{id, context_window}]` |
+| `models` | `models` | `provider?` (default: the active one) | `[{id, context_window, max_output, images, tools}]` (§10.4) |
 
 **Conversations** (`sessions`)
 
@@ -786,9 +786,19 @@ handlers decide by it.
 
 ### 10.4 `models`
 
-`{"provider": "<id>"}` → `[{"id": "claude-opus-5-5", "context_window": 200000}]`.
-`context_window` may be `null`. With no `default_model`, the provider's default is the
-first model it lists.
+`{"provider": "<id>"}` →
+`[{"id": "claude-opus-5-5", "context_window": 200000, "max_output": 32000, "images": true, "tools": true}]`.
+
+| Field | Meaning |
+|---|---|
+| `context_window` | the input it takes, in tokens |
+| `max_output` | the longest reply, in tokens |
+| `images` | it takes images |
+| `tools` | it calls tools |
+
+Each may be `null`: the provider doesn't know. The core reads only `context_window`; the
+rest is for hooks to decide by (drop images a model can't see, pick a model in `llm_call`).
+With no `default_model`, the provider's default is the first model it lists.
 
 ## 11. Accounts and sign-in
 

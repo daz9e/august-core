@@ -422,7 +422,7 @@
         "required": false
       }
     ],
-    "about": "The models {provider} offers (default: the active one): [{id, context_window}]"
+    "about": "The models {provider} offers (default: the active one): [{id, context_window, max_output, images, tools}], null where unknown"
   },
   {
     "name": "accounts",

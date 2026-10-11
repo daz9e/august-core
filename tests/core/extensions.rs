@@ -546,3 +546,10 @@ async fn the_sdk_has_the_cores_table_of_operations() {
     let err = core.call("store_get", json!({})).await.unwrap_err();
     assert!(err.to_string().contains("needs `key`"), "{err}");
 }
+
+#[tokio::test]
+async fn models_carry_what_their_provider_knows_of_them() {
+    let core = core().start().await;
+    let models = core.call("models", json!({})).await.unwrap();
+    assert_eq!(models, json!([{"id": MODEL, "context_window": 100_000, "max_output": 8_192, "images": true, "tools": null}]));
+}

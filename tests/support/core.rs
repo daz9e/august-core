@@ -455,7 +455,7 @@ impl Parts {
 fn model_setup(script: Script, requests: Arc<Mutex<Vec<Request>>>) -> Setup {
     Arc::new(move |a: &August| {
         let (script, requests) = (script.clone(), requests.clone());
-        let models = |_| async { Ok(vec![ModelInfo { id: MODEL.into(), context_window: Some(100_000) }]) };
+        let models = |_| async { Ok(vec![ModelInfo { id: MODEL.into(), context_window: Some(100_000), max_output: Some(8_192), images: Some(true), tools: None }]) };
         a.register_provider(PROVIDER, "Fake", Some(MODEL), models, move |req, stream| {
             requests.lock().unwrap().push(req.clone());
             let reply = script(&req);

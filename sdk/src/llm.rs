@@ -299,20 +299,27 @@ impl Request {
     }
 }
 
-/// A model a provider offers.
-#[derive(Debug, Clone, PartialEq)]
+/// A model a provider offers, as far as the provider knows it (`None`: unknown).
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ModelInfo {
     pub id: String,
     pub context_window: Option<usize>,
+    /// The longest reply, in tokens.
+    pub max_output: Option<usize>,
+    /// Whether it takes images.
+    pub images: Option<bool>,
+    /// Whether it calls tools.
+    pub tools: Option<bool>,
 }
 
 impl ModelInfo {
     pub fn to_json(&self) -> Value {
-        serde_json::json!({"id": self.id, "context_window": self.context_window})
+        serde_json::json!({"id": self.id, "context_window": self.context_window, "max_output": self.max_output, "images": self.images, "tools": self.tools})
     }
 
     pub fn from_json(v: &Value) -> Option<Self> {
-        Some(Self { id: v["id"].as_str()?.to_string(), context_window: v["context_window"].as_u64().map(|n| n as usize) })
+        let n = |k: &str| v[k].as_u64().map(|n| n as usize);
+        Some(Self { id: v["id"].as_str()?.to_string(), context_window: n("context_window"), max_output: n("max_output"), images: v["images"].as_bool(), tools: v["tools"].as_bool() })
     }
 }
 

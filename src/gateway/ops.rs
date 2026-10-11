@@ -80,7 +80,7 @@ pub const OPS: &[Op] = &[
     op("llm", Some("llm"), "prompt? messages? system? effort? options? thread?", "One completion without tools: {prompt} or {messages}, {system}, {effort}, {options} (fields of the provider's request body); in {thread}'s conversation's model, counted in its usage"),
     op("model_set", Some("models"), "model", "Switch to {model} of the current provider, or `provider:model` (`provider:` for its default)"),
     op("providers", Some("models"), "", "Every model provider: {id, label, default_model, extension}"),
-    op("models", Some("models"), "provider?", "The models {provider} offers (default: the active one): [{id, context_window}]"),
+    op("models", Some("models"), "provider?", "The models {provider} offers (default: the active one): [{id, context_window, max_output, images, tools}], null where unknown"),
     op("accounts", Some("admin"), "", "Every account extensions sign in to: {id, label, extension, providers, kind: key|login, status: none|connected|expired, who}"),
     op("login", Some("admin"), "account thread", "Sign in to {account}, asking in {thread}; returns {who}"),
     op("logout", Some("admin"), "account", "Sign out of {account}"),
