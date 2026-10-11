@@ -66,7 +66,7 @@ pub fn home() -> PathBuf {
     std::env::var("AUGUST_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(".august")
+            std::env::home_dir().unwrap_or_else(|| ".".into()).join(".august")
         })
 }
 

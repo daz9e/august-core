@@ -207,8 +207,13 @@ fn open_browser(root: &crate::config::Root, url: &str) {
     if root.env("AUGUST_OPEN_BROWSER").is_some_and(|v| v == "0") {
         return;
     }
-    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-    let _ = std::process::Command::new(opener).arg(url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+    // Not `cmd /c start`: cmd would cut the address at its first `&`.
+    let opener = if cfg!(target_os = "macos") { "open" } else if cfg!(windows) { "rundll32" } else { "xdg-open" };
+    let mut cmd = std::process::Command::new(opener);
+    if cfg!(windows) {
+        cmd.arg("url.dll,FileProtocolHandler");
+    }
+    let _ = cmd.arg(url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
 }
 
 /// Listens on `127.0.0.1:<port>` (0: any free one) for one request to `path`; returns the

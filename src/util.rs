@@ -22,6 +22,10 @@ pub fn env_or(key: &str, default: &str) -> String {
 /// starts with launchd's short PATH; this way what runs in the user's terminal runs here too.
 pub fn login_path() -> String {
     let own = std::env::var("PATH").unwrap_or_default();
+    // Windows has no login shell to ask (a `SHELL` there is Git Bash's, with Unix paths).
+    if cfg!(windows) {
+        return own;
+    }
     let Ok(shell) = std::env::var("SHELL") else { return own };
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {

@@ -69,7 +69,7 @@ Contents:
 | Kind | Found as | Started as |
 |---|---|---|
 | User extension | `$AUGUST_HOME/extensions/<name>/extension.json` | the `command` it names, in its folder |
-| Default extension | a binary `august-ext-<name>` in the folder `august.defaults` names (`config/august.json`), else next to the `august` binary | that binary |
+| Default extension | a binary `august-ext-<name>` (`.exe` on Windows) in the folder `august.defaults` names (`config/august.json`), else next to the `august` binary | that binary |
 
 `$AUGUST_HOME` defaults to `~/.august`. A name is 1–64 characters of `a-z`, `0-9`, `-` and
 `_`. A user extension replaces a default one of the same name. (An embedder of the core may
@@ -871,8 +871,8 @@ An extension may add commands to the `august` program by listing them in `cli`:
 `august <name> args…` runs `exec` with `args` appended, in the user's terminal. `""` is
 `august` with no command. The program gets `AUGUST_SOCKET` and `AUGUST_TOKEN`, and may
 call August's operations **as the extension that registered the command**, with its
-permissions. It does so over the control socket (`$AUGUST_HOME/control.sock`, this user
-only), one JSON object per line:
+permissions. It does so over the control socket (`$AUGUST_HOME/control.sock`; on Windows
+the named pipe `AUGUST_SOCKET` names; this user only), one JSON object per line:
 
 ```json
 {"token": "<AUGUST_TOKEN>", "call": "send", "params": {"thread": "home", "message": "hi"}}

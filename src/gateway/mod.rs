@@ -339,13 +339,17 @@ pub async fn serve() -> Result<()> {
     let model = gw.model.read().unwrap().clone();
     let label = if model.0.is_empty() { "no model provider yet (/login)".to_string() } else { format!("{} · {}", model.0, model.1) };
     println!("august · {label} · workspace {}", root.workspace().display());
+    #[cfg(unix)]
     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let signals = gw.clone();
     tokio::spawn(async move {
+        #[cfg(unix)]
         tokio::select! {
             _ = term.recv() => {}
             _ = tokio::signal::ctrl_c() => {}
         }
+        #[cfg(windows)]
+        tokio::signal::ctrl_c().await.ok();
         signals.shutdown("signal").await;
     });
     gw.run().await

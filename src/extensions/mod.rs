@@ -275,9 +275,9 @@ pub fn bin_dir() -> PathBuf {
     exe.parent().unwrap_or(Path::new(".")).to_path_buf()
 }
 
-/// `august-ext-<name>` in `bin`.
+/// `august-ext-<name>` in `bin` (`.exe` on Windows).
 fn default_binary(bin: &Path, name: &str) -> PathBuf {
-    bin.join(format!("august-ext-{name}"))
+    bin.join(format!("august-ext-{name}{}", std::env::consts::EXE_SUFFIX))
 }
 
 /// The extensions that ship with August: binaries `august-ext-<name>` in `bin`.
@@ -285,7 +285,7 @@ fn shipped(bin: Option<&Path>) -> Vec<String> {
     let Some(bin) = bin else { return Vec::new() };
     let names = std::fs::read_dir(bin).into_iter().flatten().filter_map(|e| e.ok());
     let mut names: Vec<String> = names
-        .filter_map(|e| e.file_name().to_str()?.strip_prefix("august-ext-").map(String::from))
+        .filter_map(|e| e.file_name().to_str()?.strip_prefix("august-ext-")?.strip_suffix(std::env::consts::EXE_SUFFIX).map(String::from))
         .filter(|n| valid_name(n) && default_binary(bin, n).is_file())
         .collect();
     names.sort();
