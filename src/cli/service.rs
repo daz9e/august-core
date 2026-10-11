@@ -10,13 +10,27 @@ use std::process::Command;
 
 const LABEL: &str = "dev.august.agent";
 
-/// launchd label; `AUGUST_SERVICE_LABEL` lets tests install a separate service.
-fn label() -> String {
-    crate::util::env_or("AUGUST_SERVICE_LABEL", LABEL)
+/// `""` for the default home (`~/.august`), else a suffix naming this `AUGUST_HOME`, so each
+/// home gets a service of its own.
+fn suffix() -> String {
+    if config::home() == home_dir().join(".august") {
+        return String::new();
+    }
+    // FNV-1a: stable across builds, unlike std's hasher.
+    let hash = config::home().to_string_lossy().bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+    format!("-{:08x}", hash as u32)
 }
-const UNIT: &str = "august.service";
 
-/// Whether `august serve` installed the background service.
+/// launchd label.
+fn label() -> String {
+    format!("{LABEL}{}", suffix())
+}
+
+/// systemd unit.
+fn unit() -> String {
+    format!("august{}.service", suffix())
+}
+
 /// Whether `august serve` installed the background service for this `AUGUST_HOME` (one
 /// installed for another home is not this August's to stop or restart).
 pub fn installed() -> bool {
@@ -53,21 +67,21 @@ fn plist_path() -> PathBuf {
 }
 
 fn unit_path() -> PathBuf {
-    home_dir().join(".config/systemd/user").join(UNIT)
+    home_dir().join(".config/systemd/user").join(unit())
 }
 
 /// The Windows task, one per `AUGUST_HOME`.
 fn task() -> String {
     let home: String = config::home().to_string_lossy().chars().map(|c| if matches!(c, '\\' | '/' | ':') { '_' } else { c }).collect();
-    format!("{} {home}", label())
+    format!("{LABEL} {home}")
 }
 
 fn xml(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
-/// Installs the service for the current binary and working directory (where
-/// `.env` and a relative `AUGUST_WORKSPACE` are resolved) and starts it.
+/// Installs the service for the current binary and working directory (where `.env` is
+/// read) and starts it.
 pub fn start() -> Result<()> {
     let exe = std::env::current_exe()?.canonicalize()?;
     let dir = std::env::current_dir()?;
@@ -169,7 +183,7 @@ pub fn start() -> Result<()> {
             println!("logs: {}   (august logs)\nstop: august stop", log.display());
             return Ok(());
         }
-        let unit = format!(
+        let definition = format!(
             "[Unit]\nDescription=August agent\nAfter=network-online.target\nWants=network-online.target\n\n\
              [Service]\nExecStart=\"{exe}\" gateway\nWorkingDirectory={dir}\nEnvironment=\"PATH={path}\"\nEnvironment=\"AUGUST_HOME={home}\"\n\
              Restart=on-failure\nRestartSec=5\nStandardOutput=append:{log}\nStandardError=append:{log}\n\n\
@@ -181,10 +195,10 @@ pub fn start() -> Result<()> {
         );
         let file = unit_path();
         std::fs::create_dir_all(file.parent().unwrap())?;
-        std::fs::write(&file, unit)?;
+        std::fs::write(&file, definition)?;
         run(Command::new("systemctl").args(["--user", "daemon-reload"]))?;
-        run(Command::new("systemctl").args(["--user", "enable", "--now", UNIT]))?;
-        run(Command::new("systemctl").args(["--user", "restart", UNIT]))?;
+        run(Command::new("systemctl").args(["--user", "enable", "--now", &unit()]))?;
+        run(Command::new("systemctl").args(["--user", "restart", &unit()]))?;
         if !linger {
             println!("to keep it running after logout: sudo loginctl enable-linger $USER");
         }
@@ -217,7 +231,7 @@ pub fn kick() -> Result<()> {
     } else if cfg!(target_os = "macos") {
         run(Command::new("launchctl").args(["kickstart", &format!("gui/{}/{}", uid()?, label())]))
     } else {
-        run(Command::new("systemctl").args(["--user", "restart", UNIT]))
+        run(Command::new("systemctl").args(["--user", "restart", &unit()]))
     }
 }
 
@@ -274,7 +288,7 @@ pub fn uninstall() -> Result<()> {
         if !file.exists() {
             bail!("service is not installed");
         }
-        run(Command::new("systemctl").args(["--user", "disable", "--now", UNIT]))?;
+        run(Command::new("systemctl").args(["--user", "disable", "--now", &unit()]))?;
         std::fs::remove_file(file)?;
         run(Command::new("systemctl").args(["--user", "daemon-reload"]))?;
     }

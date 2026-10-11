@@ -10,14 +10,6 @@ pub fn new_uuid() -> String {
     format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
 }
 
-/// Env var value, or `default` when unset or empty.
-pub fn env_or(key: &str, default: &str) -> String {
-    std::env::var(key)
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| default.to_string())
-}
-
 /// PATH for the gateway: its own, then what the user's login shell adds. A background service
 /// starts with launchd's short PATH; this way what runs in the user's terminal runs here too.
 pub fn login_path() -> String {
