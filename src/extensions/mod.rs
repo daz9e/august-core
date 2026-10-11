@@ -1009,7 +1009,8 @@ impl Extensions {
     /// `secrets` with `admin`, the first in the user's order. The one that kept them last is
     /// waited for while it starts; one disabled or down is an error, never a fall back to the
     /// core's files. Only once it is gone, or no longer takes the job, are they the core's again.
-    pub async fn secrets_keeper(&self) -> Result<Option<String>> {
+    /// The keeper's own secrets (what it needs to start) are the core's: `None` for `caller`.
+    pub async fn secrets_keeper(&self, caller: &str) -> Result<Option<String>> {
         let file = self.dir.join(".runtime").join("secrets-keeper");
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
@@ -1027,9 +1028,12 @@ impl Extensions {
                     std::fs::create_dir_all(self.dir.join(".runtime"))?;
                     std::fs::write(&file, &name)?;
                 }
-                return Ok(Some(name));
+                return Ok(Some(name).filter(|n| n != caller));
             }
             let Ok(kept) = std::fs::read_to_string(&file) else { return Ok(None) };
+            if kept == caller {
+                return Ok(None);
+            }
             let state = self.slots.read().unwrap().iter().find(|s| s.name == kept).map(|s| s.state.clone());
             match state {
                 Some(State::Starting) if std::time::Instant::now() < deadline => tokio::time::sleep(Duration::from_millis(100)).await,

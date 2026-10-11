@@ -654,9 +654,8 @@ The taker gets `event` requests named `secrets`:
 `extension` is the caller, filled in by August: one extension never reaches another's
 secrets. August remembers the taker. While it starts, secret calls wait for it (up to 30 s);
 while it is disabled or down, they fail rather than fall back to the files. Once it is
-uninstalled or no longer takes the job, the files are used again. The taker keeps what it
-needs to unlock the secrets (a key file, a passphrase, a hardware key) itself, out of
-`secret_*`.
+uninstalled or no longer takes the job, the files are used again. The taker's own secrets
+(what it needs to unlock the rest: a key, a passphrase) stay in `secrets/<name>.json`.
 
 ## 9. Messengers
 

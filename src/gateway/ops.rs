@@ -508,7 +508,7 @@ impl Gateway {
     /// Secret `key` of `ext`, or with `set` keeps (`Some(None)`: deletes) it: through the
     /// extension that took the `secrets` job, else in `secrets/<ext>.json`.
     async fn secret(&self, ext: &str, key: &str, set: Option<Option<&str>>) -> Result<Value> {
-        if let Some(keeper) = self.ext.secrets_keeper().await? {
+        if let Some(keeper) = self.ext.secrets_keeper(ext).await? {
             let data = match set {
                 None => json!({"op": "get", "extension": ext, "key": key}),
                 Some(value) => json!({"op": "set", "extension": ext, "key": key, "value": value}),

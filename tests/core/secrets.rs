@@ -17,6 +17,12 @@ fn vault(kept: Vault, admin: bool) -> impl Fn(&August) + Send + Sync + 'static {
         if admin {
             a.needs(&["admin"]);
         }
+        // What it needs to start can't wait for itself: its own secrets stay the core's.
+        let me = a.clone();
+        a.register_command("unlock", "", move |_, _| {
+            let me = me.clone();
+            async move { me.set_secret("identity", Some("AGE-SECRET-KEY-1")).await.map(|_| Some("kept".into())) }
+        });
         let kept = kept.clone();
         a.on("secrets", move |e, _| {
             let kept = kept.clone();
@@ -44,6 +50,8 @@ async fn an_extension_that_takes_secrets_keeps_everyones() {
     assert_eq!(core.call("secret_get", json!({"key": "token"})).await.unwrap(), "t-1");
     core.call("secret_set", json!({"key": "token", "value": null})).await.unwrap();
     assert_eq!(core.call("secret_get", json!({"key": "token"})).await.unwrap(), Value::Null);
+    core.chat("1").ask("/unlock", "kept").await;
+    assert!(std::fs::read_to_string(core.path("secrets/vault.json")).unwrap().contains("AGE-SECRET-KEY-1"));
 
     // Down, it is not replaced by the core's files: the call fails.
     core.call("secret_set", json!({"key": "token", "value": "t-2"})).await.unwrap();
