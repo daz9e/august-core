@@ -232,8 +232,8 @@ impl Gateway {
             "turns" => self.turns.list(thread(p).ok().as_ref()),
             "stop" => json!({"cancelled": self.stop(&thread(p)?).await}),
             "callTool" => {
-                let (output, is_error) = self.call_tool(self.origin(p)?, arg("name")?, &p["input"], &caller).await?;
-                json!({"output": output, "isError": is_error})
+                let out = self.call_tool(self.origin(p)?, arg("name")?, &p["input"], &caller).await?;
+                json!({"output": out.text, "isError": out.is_error, "images": out.images})
             }
             "llm" => {
                 let system = p["system"].as_str().filter(|s| !s.is_empty()).unwrap_or("You are a helpful assistant.");
@@ -618,7 +618,7 @@ impl Gateway {
         Ok(extensions::Origin { thread: Some(thread(p)?), turn, ..Default::default() })
     }
 
-    async fn call_tool(&self, origin: extensions::Origin, name: &str, input: &Value, caller: &str) -> Result<(String, bool)> {
+    async fn call_tool(&self, origin: extensions::Origin, name: &str, input: &Value, caller: &str) -> Result<crate::tools::Output> {
         let thread = origin.thread.clone().expect("a call's origin has its thread");
         self.messenger(&thread)?;
         let ctx = ToolCtx {

@@ -30,7 +30,7 @@ use tokio::sync::{mpsc, oneshot};
 type Io = (Box<dyn AsyncRead + Send + Unpin>, Box<dyn AsyncWrite + Send + Unpin>, mpsc::UnboundedReceiver<String>);
 
 type Fut<T> = Pin<Box<dyn Future<Output = Result<T>> + Send>>;
-type ToolFn = Arc<dyn Fn(Value, Ctx) -> Fut<String> + Send + Sync>;
+type ToolFn = Arc<dyn Fn(Value, Ctx) -> Fut<Value> + Send + Sync>;
 type CommandFn = Arc<dyn Fn(String, Ctx) -> Fut<Option<String>> + Send + Sync>;
 type CompleteFn = Arc<dyn Fn(llm::Request, Stream) -> Fut<llm::Completion> + Send + Sync>;
 type ModelsFn = Arc<dyn Fn(String) -> Fut<Vec<llm::ModelInfo>> + Send + Sync>;
@@ -359,6 +359,13 @@ impl Ctx {
     }
 }
 
+/// An image for the model to see: a file on disk and its MIME type.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Image {
+    pub path: String,
+    pub mime: String,
+}
+
 struct Tool {
     name: String,
     description: String,
@@ -573,8 +580,33 @@ impl August {
         F: Fn(Value, Ctx) -> R + Send + Sync + 'static,
         R: Future<Output = Result<String>> + Send + 'static,
     {
-        let run: ToolFn = Arc::new(move |input, ctx| Box::pin(run(input, ctx)));
-        let tool = Tool { name: name.into(), description: description.into(), parameters, run };
+        let run = Arc::new(run);
+        let run: ToolFn = Arc::new(move |input, ctx| {
+            let reply = run(input, ctx);
+            Box::pin(async move { Ok(Value::String(reply.await?)) })
+        });
+        self.add_tool(Tool { name: name.into(), description: description.into(), parameters, run });
+    }
+
+    /// A tool whose output also shows the model images (screenshots, pages, plots).
+    pub fn register_tool_with_images<F, R>(&self, name: &str, description: &str, parameters: Value, run: F)
+    where
+        F: Fn(Value, Ctx) -> R + Send + Sync + 'static,
+        R: Future<Output = Result<(String, Vec<Image>)>> + Send + 'static,
+    {
+        let run = Arc::new(run);
+        let run: ToolFn = Arc::new(move |input, ctx| {
+            let reply = run(input, ctx);
+            Box::pin(async move {
+                let (text, images) = reply.await?;
+                Ok(json!({"text": text, "images": images}))
+            })
+        });
+        self.add_tool(Tool { name: name.into(), description: description.into(), parameters, run });
+    }
+
+    fn add_tool(&self, tool: Tool) {
+        let name = tool.name.clone();
         let mut tools = self.0.tools.write().unwrap();
         tools.retain(|t| t.name != name);
         tools.push(tool);
@@ -872,7 +904,7 @@ impl August {
             "tool" => {
                 let run = self.0.tools.read().unwrap().iter().find(|t| t.name == name).map(|t| t.run.clone());
                 let run = run.ok_or_else(|| anyhow!("no tool named {name}"))?;
-                Ok(Value::String(run(params["input"].clone(), ctx).await?))
+                run(params["input"].clone(), ctx).await
             }
             "command" => {
                 let run = self.0.commands.read().unwrap().iter().find(|c| c.0 == name).map(|c| c.2.clone());

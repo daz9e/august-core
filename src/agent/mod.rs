@@ -508,14 +508,18 @@ impl Agent {
             let outputs =
                 futures_util::future::join_all(calls.iter().map(|(id, name, input)| self.tools.call(Some(id), name, input, ctx))).await;
             let mut results = Vec::new();
-            for ((id, name, input), (output, is_error)) in calls.iter().zip(outputs) {
-                self.turn_calls.push(json!({"name": name, "input": input, "output": output, "isError": is_error}));
+            // Images tools return follow every result, where providers take them.
+            let mut images = Vec::new();
+            for ((id, name, input), out) in calls.iter().zip(outputs) {
+                self.turn_calls.push(json!({"name": name, "input": input, "output": out.text, "isError": out.is_error}));
                 results.push(Block::ToolResult {
                     tool_use_id: id.to_string(),
-                    content: output,
-                    is_error,
+                    content: out.text,
+                    is_error: out.is_error,
                 });
+                images.extend(crate::llm::image_blocks(&out.images));
             }
+            results.extend(images);
             self.history.push(Message {
                 role: Role::User,
                 content: results,

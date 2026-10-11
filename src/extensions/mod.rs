@@ -1089,12 +1089,17 @@ impl Extensions {
     }
 
     /// Runs an extension tool; `None` if no extension has it.
-    pub async fn call_tool(&self, name: &str, input: &Value, chat: &Origin) -> Option<Result<String, String>> {
+    /// Runs a tool: its text and images (`[{path, mime}]`). A reply is a string or
+    /// `{text, images}`; anything else is stringified.
+    pub async fn call_tool(&self, name: &str, input: &Value, chat: &Origin) -> Option<Result<(String, Value), String>> {
         let host = self.tool_hosts().into_iter().find(|(_, h)| h.manifest().tools.iter().any(|t| t.name == name))?.1;
         let params = json!({"name": name, "input": input, "ctx": ctx_json(chat)});
         Some(host.request("tool", params, TOOL_TIMEOUT).await.map(|v| match v {
-            Value::String(s) => s,
-            other => other.to_string(),
+            Value::String(s) => (s, json!([])),
+            Value::Object(o) if o.get("images").is_some_and(Value::is_array) => {
+                (o.get("text").and_then(Value::as_str).unwrap_or_default().to_string(), o["images"].clone())
+            }
+            other => (other.to_string(), json!([])),
         }))
     }
 

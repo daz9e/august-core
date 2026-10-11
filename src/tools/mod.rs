@@ -19,6 +19,20 @@ pub struct ToolCtx {
     pub caller: String,
 }
 
+/// What a tool call gave back.
+pub struct Output {
+    pub text: String,
+    /// `[{path, mime}]`: images for the model to see.
+    pub images: Value,
+    pub is_error: bool,
+}
+
+impl Output {
+    fn error(text: String) -> Self {
+        Self { text, images: json!([]), is_error: true }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct ToolRegistry {
     /// Extension tools and the `tool_call` / `tool_result` hooks.
@@ -62,56 +76,63 @@ impl ToolRegistry {
         specs
     }
 
-    /// Runs a tool through the extension hooks; errors become `(message, true)` so the
-    /// model can react to them.
+    /// Runs a tool through the extension hooks; errors become outputs with `is_error` so
+    /// the model can react to them.
     /// `id` is the model's id of the call (`None` for calls from elsewhere).
-    pub async fn call(&self, id: Option<&str>, name: &str, input: &Value, ctx: &ToolCtx) -> (String, bool) {
-        let (output, is_error) = self.call_hooked(id, name, input, ctx).await;
-        let mut e = crate::db::Entry::new("tool", json!({"tool": name, "id": id, "input": input, "output": output, "isError": is_error}));
+    pub async fn call(&self, id: Option<&str>, name: &str, input: &Value, ctx: &ToolCtx) -> Output {
+        let out = self.call_hooked(id, name, input, ctx).await;
+        let mut data = json!({"tool": name, "id": id, "input": input, "output": out.text, "isError": out.is_error});
+        if out.images.as_array().is_some_and(|i| !i.is_empty()) {
+            data["images"] = out.images.clone();
+        }
+        let mut e = crate::db::Entry::new("tool", data);
         e.session = ctx.origin.thread.as_ref().and_then(|t| ctx.db.current_session(&t.key()).ok().flatten());
         e.turn = ctx.origin.turn.as_ref().map(|t| t.id);
         e.caller = Some(ctx.caller.clone());
         crate::agent::SessionStore::journal(&*ctx.db, &e);
-        (output, is_error)
+        out
     }
 
-    async fn call_hooked(&self, id: Option<&str>, name: &str, input: &Value, ctx: &ToolCtx) -> (String, bool) {
+    async fn call_hooked(&self, id: Option<&str>, name: &str, input: &Value, ctx: &ToolCtx) -> Output {
         if ctx.origin.turn.as_ref().and_then(|t| t.callable.as_ref()).is_some_and(|c| !c.contains(name)) {
-            return (format!("`{name}` is not available here"), true);
+            return Output::error(format!("`{name}` is not available here"));
         }
         let Some(ext) = self.ext.as_ref().filter(|_| self.offered(name)) else {
-            return (format!("unknown tool: {name}"), true);
+            return Output::error(format!("unknown tool: {name}"));
         };
         let mut input = input.clone();
         if ext.listens("tool_call") {
             let data = ext.emit("tool_call", json!({"tool": name, "input": input, "id": id, "caller": ctx.caller}), &ctx.origin).await;
             match &data["block"] {
                 Value::String(reason) if !reason.is_empty() => {
-                    return (format!("blocked by an extension: {reason}"), true);
+                    return Output::error(format!("blocked by an extension: {reason}"));
                 }
-                Value::Bool(true) => return ("blocked by an extension".into(), true),
+                Value::Bool(true) => return Output::error("blocked by an extension".into()),
                 _ => {}
             }
             input = data["input"].clone();
         }
-        let (mut output, mut is_error) = match ext.has_tool(name).then(|| ext.call_tool(name, &input, &ctx.origin)) {
+        let mut out = match ext.has_tool(name).then(|| ext.call_tool(name, &input, &ctx.origin)) {
             Some(call) => match call.await {
-                Some(Ok(out)) => (out, false),
-                Some(Err(e)) => (format!("error: {e}"), true),
-                None => (format!("unknown tool: {name}"), true),
+                Some(Ok((text, images))) => Output { text, images, is_error: false },
+                Some(Err(e)) => Output::error(format!("error: {e}")),
+                None => Output::error(format!("unknown tool: {name}")),
             },
-            None => (format!("unknown tool: {name}"), true),
+            None => Output::error(format!("unknown tool: {name}")),
         };
         if ext.listens("tool_result") {
-            let data = json!({"tool": name, "input": input, "id": id, "caller": ctx.caller, "output": output, "isError": is_error});
+            let data = json!({"tool": name, "input": input, "id": id, "caller": ctx.caller, "output": out.text, "isError": out.is_error, "images": out.images});
             let data = ext.emit("tool_result", data, &ctx.origin).await;
             if let Some(o) = data["output"].as_str() {
-                output = o.to_string();
+                out.text = o.to_string();
             }
             if let Some(e) = data["isError"].as_bool() {
-                is_error = e;
+                out.is_error = e;
+            }
+            if data["images"].is_array() {
+                out.images = data["images"].clone();
             }
         }
-        (output, is_error)
+        out
     }
 }

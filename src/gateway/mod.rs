@@ -17,7 +17,7 @@ use crate::db::Db;
 use crate::extensions::{self, Extensions};
 pub use crate::extensions::{Io, Link};
 use crate::messengers::{Inbound, InboundKind, Messenger, OutMessage, Thread, User};
-use crate::llm::{Block, LlmProvider};
+use crate::llm::LlmProvider;
 use crate::llm::providers;
 use crate::tools::ToolRegistry;
 use anyhow::Result;
@@ -254,9 +254,7 @@ impl Gateway {
             return Ok(());
         }
         let text = data["text"].as_str().unwrap_or_default().to_string();
-        let images: Vec<Block> = data["images"].as_array().into_iter().flatten().filter_map(|i| {
-            Some(Block::Image { media_type: i["mime"].as_str()?.into(), path: i["path"].as_str()?.into() })
-        }).collect();
+        let images = crate::llm::image_blocks(&data["images"]);
         if text.is_empty() && images.is_empty() {
             return Ok(());
         }

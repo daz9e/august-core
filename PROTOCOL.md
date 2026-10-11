@@ -237,7 +237,7 @@ Rules:
 | Method | Params | Reply | Sent to |
 |---|---|---|---|
 | `event` | `{name, data, ctx}` | changed fields of `data` (§7) | extensions that list `name` in `events`, or take a job (§8) |
-| `tool` | `{name, input, ctx}` | the output: a string (anything else is stringified). An error is shown to the model as `error: <message>`. | the extension offering the tool |
+| `tool` | `{name, input, ctx}` | the output: a string, or `{text, images: [{path, mime}]}` to show the model images (absolute paths) after the tool results; anything else is stringified. An error is shown to the model as `error: <message>`. | the extension offering the tool |
 | `command` | `{name, args, ctx}` | the reply text, or `null` for none | the extension offering the command |
 | `health` | `{}` | `{status: "ok"\|"degraded"\|"failed", detail?}` | every running extension (§12) |
 | `cancel` | `{id}` (notification) | — | §1 |
@@ -378,7 +378,7 @@ permissions. Calls are requests: `{"id", "method": "<operation>", "params": {...
 
 | Operation | Permission | Params | Result |
 |---|---|---|---|
-| `callTool` | `tools` | `thread, name, input, from_turn?` | `{output, isError}`. Runs any agent tool through the `tool_call`/`tool_result` hooks, with caller `ext:<name>`. |
+| `callTool` | `tools` | `thread, name, input, from_turn?` | `{output, isError, images}`. Runs any agent tool through the `tool_call`/`tool_result` hooks, with caller `ext:<name>`. |
 | `llm` | `llm` | `prompt` or `messages` (§10.1); `system`, `effort`, `options`, `thread?` | the reply text. One completion without tools. In a thread, it uses that conversation's model and is counted there (`llm_result`). |
 | `model_set` | `models` | `model`: `name` of the active provider, `provider:name`, or `provider:` for its default | `{provider, model}`; passes `model_select` |
 | `providers` | `models` | — | `[{id, label, default_model, extension}]` |
@@ -493,7 +493,7 @@ All of these carry `ctx.turn`.
 | `llm_error` | `{step, attempt, model, error: {kind, message}, streamed}` | `retry: true`, with `delayMs` and `model` (for the rest of the turn) |
 | `llm_result` *(observe)* | `{step, session, text, toolCalls: [{name, input}], usage: {inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}}` | — |
 | `tool_call` | `{tool, input, id, caller}` | `input` (changed arguments), `block` (the model sees `blocked by an extension: <reason>`) |
-| `tool_result` | `{tool, input, id, caller, output, isError}` | `output`, `isError` |
+| `tool_result` | `{tool, input, id, caller, output, isError, images}` | `output`, `isError`, `images` |
 | `turn_event` *(observe)* | `{kind: "text"\|"step"\|"tool"\|"note", text?, tool?, input?}` | — |
 | `turn_end` *(observe)* | `{text, reply, status, error, toolCalls: n, unattended}` | — |
 | `turn_settled` *(observe)* | `{}` | — |

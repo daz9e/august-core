@@ -2,6 +2,7 @@
 //! once; tool, model, message and turn hooks see and change what they are about.
 
 use crate::support::*;
+use august_ext::llm::Block;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -87,6 +88,28 @@ async fn tool_hooks_know_the_call_and_who_made_it() {
     chat.wait_for("call read call_1 by model").await;
     chat.ask("/peek", "peek: hello").await;
     chat.wait_for("call read null by ext:watch").await;
+}
+
+#[tokio::test]
+async fn a_tool_shows_the_model_images_after_the_results() {
+    let core = core()
+        .model(|req| match tool_result(req) {
+            Some(out) => text(&format!("Result: {out}")),
+            None => tool("shot", json!({})),
+        })
+        .ext("screen", |a| {
+            a.register_tool_with_images("shot", "A screenshot", json!({"type": "object"}), |_, _| async {
+                Ok(("the screen".to_string(), vec![august_ext::Image { path: "/tmp/screen.png".into(), mime: "image/png".into() }]))
+            });
+            a.on("tool_result", |d, _| async move { Ok(Some(json!({"output": format!("{} + {} image", d["output"].as_str().unwrap(), d["images"].as_array().unwrap().len())}))) });
+        })
+        .start()
+        .await;
+    let chat = core.chat("1");
+
+    chat.ask("look", "Result: the screen + 1 image").await;
+    let blocks = core.requests()[1].messages.last().unwrap().content.clone();
+    assert!(matches!(&blocks[..], [Block::ToolResult { .. }, Block::Image { media_type, path }] if media_type == "image/png" && path == "/tmp/screen.png"), "{blocks:?}");
 }
 
 #[tokio::test]
