@@ -1,7 +1,6 @@
-//! Signing in to accounts. Extensions declare accounts; August runs every sign-in: it asks
-//! for API keys itself, and for any other kind (OAuth, device codes, ...) shows the steps an
-//! extension's script takes (`login_*` ops) in the thread the sign-in started from, receives
-//! OAuth redirects on localhost and keeps the secrets (`config::secret`).
+//! Signing in to accounts. Extensions declare accounts and script every sign-in (an API key,
+//! OAuth, device codes, ...); August shows the steps (`login_*` ops) in the thread the sign-in
+//! started from, receives OAuth redirects on localhost and records how accounts stand.
 
 use super::{Gateway, waits};
 use crate::extensions::{AccountInfo, Origin};
@@ -27,32 +26,21 @@ const SCOPE: &str = "august:accounts";
 
 impl Gateway {
     /// Every account with the extension offering it and how it stands:
-    /// `{id, label, extension, providers, kind: key|login, status: none|connected|expired, who}`.
+    /// `{id, label, extension, providers, status: none|connected|expired, who}`.
     pub(super) fn accounts(&self) -> Result<Value> {
         let mut out = Vec::new();
         for (ext, a) in self.ext.accounts() {
-            let (status, who) = self.account_status(&ext, &a)?;
-            let kind = if a.key.is_some() { "key" } else { "login" };
-            out.push(json!({"id": a.id, "label": a.label, "extension": ext, "providers": a.providers, "kind": kind, "status": status, "who": who}));
+            let v: Value = self.db.kv_get(SCOPE, &format!("{ext}/{}", a.id))?.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+            let status = v["status"].as_str().unwrap_or("none");
+            out.push(json!({"id": a.id, "label": a.label, "extension": ext, "providers": a.providers, "status": status, "who": v["who"]}));
         }
         Ok(Value::Array(out))
     }
 
-    fn account_status(&self, ext: &str, a: &AccountInfo) -> Result<(String, Option<String>)> {
-        if let Some(key) = &a.key {
-            if let Some(env) = key.env.as_deref().filter(|e| self.root().env(e).is_some()) {
-                return Ok(("connected".into(), Some(format!("key from ${env}"))));
-            }
-            let saved = self.root().secret(ext, &a.id)?.is_some();
-            return Ok((if saved { "connected" } else { "none" }.into(), None));
-        }
-        let v: Value = self.db.kv_get(SCOPE, &format!("{ext}/{}", a.id))?.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-        Ok((v["status"].as_str().unwrap_or("none").into(), v["who"].as_str().map(String::from)))
-    }
-
     /// Records how an account of `ext` stands; an expired one is told to the home thread.
+    /// An extension still starting may report its accounts: they are kept under its name.
     pub(super) async fn account_update(&self, ext: &str, id: &str, status: &str, who: Option<&str>) -> Result<()> {
-        let account = self.find_account(id).filter(|(e, _)| e == ext).ok_or_else(|| anyhow!("{ext} has no account `{id}`"))?;
+        let label = self.find_account(id).filter(|(e, _)| e == ext).map_or_else(|| id.to_string(), |(_, a)| a.label);
         anyhow::ensure!(["none", "connected", "expired"].contains(&status), "status is none, connected or expired");
         let key = format!("{ext}/{id}");
         let value = (status != "none").then(|| json!({"status": status, "who": who}).to_string());
@@ -61,7 +49,7 @@ impl Gateway {
             && let Ok(home) = self.home()
             && let Ok(m) = self.messenger(&home)
         {
-            let text = format!("🔑 The sign-in to {} has expired. Sign in again with `/login {id}`.", account.1.label);
+            let text = format!("🔑 The sign-in to {label} has expired. Sign in again with `/login {id}`.");
             m.send(&home.id, &OutMessage::text(text)).await.ok();
         }
         Ok(())
@@ -73,14 +61,7 @@ impl Gateway {
 
     /// Signs in to account `id` from `thread`; returns who signed in.
     pub(super) async fn login(self: &Arc<Self>, id: &str, thread: Thread) -> Result<Value> {
-        let (ext, account) = self.find_account(id).ok_or_else(|| anyhow!("no account `{id}`"))?;
-        if let Some(key) = &account.key {
-            let value = self.ask(&thread, &format!("Send your {} for {}.", key.label, account.label), true, &[]).await?;
-            let check = json!({"account": id, "key": value});
-            self.ext.call_account(&ext, "account_check", check, &Origin::thread(thread.clone())).await.map_err(|e| anyhow!("the key was not accepted: {e}"))?;
-            self.root().set_secret(&ext, id, Some(&value))?;
-            return Ok(json!({"who": null}));
-        }
+        let (ext, _) = self.find_account(id).ok_or_else(|| anyhow!("no account `{id}`"))?;
         let session = self.next_login.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.logins.lock().unwrap().insert(session, Session { ext: ext.clone(), thread: thread.clone(), callback: None });
         let result = self.ext.call_account(&ext, "login", json!({"account": id, "session": session}), &Origin::thread(thread)).await;
@@ -90,12 +71,9 @@ impl Gateway {
         Ok(signed)
     }
 
-    /// Signs out of account `id`: its key, or whatever its extension keeps.
+    /// Signs out of account `id`: its extension forgets what it keeps.
     pub(super) async fn logout(&self, id: &str) -> Result<()> {
-        let (ext, account) = self.find_account(id).ok_or_else(|| anyhow!("no account `{id}`"))?;
-        if account.key.is_some() {
-            return self.root().set_secret(&ext, id, None);
-        }
+        let (ext, _) = self.find_account(id).ok_or_else(|| anyhow!("no account `{id}`"))?;
         self.ext.call_account(&ext, "logout", json!({"account": id}), &Origin::default()).await.map_err(|e| anyhow!(e))?;
         self.account_update(&ext, id, "none", None).await
     }

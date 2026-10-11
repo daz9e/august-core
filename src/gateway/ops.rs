@@ -81,7 +81,7 @@ pub const OPS: &[Op] = &[
     op("model_set", Some("models"), "model", "Switch to {model} of the current provider, or `provider:model` (`provider:` for its default)"),
     op("providers", Some("models"), "", "Every model provider: {id, label, default_model, extension}"),
     op("models", Some("models"), "provider?", "The models {provider} offers (default: the active one): [{id, context_window, max_output, images, tools}], null where unknown"),
-    op("accounts", Some("admin"), "", "Every account extensions sign in to: {id, label, extension, providers, kind: key|login, status: none|connected|expired, who}"),
+    op("accounts", Some("admin"), "", "Every account extensions sign in to: {id, label, extension, providers, status: none|connected|expired, who}"),
     op("login", Some("admin"), "account thread", "Sign in to {account}, asking in {thread}; returns {who}"),
     op("logout", Some("admin"), "account", "Sign out of {account}"),
     op("account_update", None, "account status who?", "Tell how your {account} stands: {status: none|connected|expired, who}"),

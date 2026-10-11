@@ -102,18 +102,6 @@ pub struct AccountInfo {
     pub label: String,
     /// Model providers it unlocks.
     pub providers: Vec<String>,
-    /// Signed in with an API key August asks for.
-    pub key: Option<KeyLogin>,
-    /// Signed in by the extension's own script (`login`).
-    pub login: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct KeyLogin {
-    /// What to ask for.
-    pub label: String,
-    /// A variable that stands in for the key.
-    pub env: Option<String>,
 }
 
 /// A model provider an extension offers.
@@ -639,8 +627,6 @@ fn parse_manifest(params: &Value) -> Manifest {
                     id: a["id"].as_str()?.to_string(),
                     label: a["label"].as_str().unwrap_or_default().to_string(),
                     providers: a["providers"].as_array().into_iter().flatten().filter_map(|p| p.as_str().map(String::from)).collect(),
-                    key: a["key"]["label"].as_str().map(|label| KeyLogin { label: label.into(), env: a["key"]["env"].as_str().map(String::from) }),
-                    login: a["login"] == true,
                 })
             })
             .collect(),

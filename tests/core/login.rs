@@ -1,6 +1,6 @@
-//! Signing in is the core's mechanic: it asks for an API key (kept out of the chat and the
-//! conversation, checked by the extension) or runs an extension's own sign-in script, whose
-//! redirect it receives on localhost or the user pastes; it keeps the secrets.
+//! Signing in is the core's mechanic: an extension scripts it, the core shows the steps in
+//! the thread it started from (a secret answer kept out of the chat and the conversation),
+//! receives the redirect on localhost or the user pastes it; it keeps the secrets.
 
 use crate::support::*;
 use august_ext::{August, Signed};
@@ -13,12 +13,24 @@ fn secret(core: &Core, ext: &str, key: &str) -> Option<String> {
     serde_json::from_str::<Value>(&text).unwrap()[key].as_str().map(String::from)
 }
 
+/// A sign-in that asks for a secret and refuses `bad`.
 fn acme_key(a: &August) {
-    a.register_key_account("acme", "Acme", &["acme-llm"], "API key", Some("ACME_KEY"), |_, key| async move {
-        anyhow::ensure!(key != "bad", "401 unauthorized");
-        Ok(())
-    });
-    a.register_key_account("other", "Other", &[], "API key", Some("OTHER_KEY"), |_, _| async { Ok(()) });
+    let me = a.clone();
+    a.register_login_account(
+        "acme",
+        "Acme",
+        &["acme-llm"],
+        move |_, steps| {
+            let me = me.clone();
+            async move {
+                let key = steps.ask("Send your API key for Acme.", true).await?;
+                anyhow::ensure!(key != "bad", "401 unauthorized");
+                me.set_secret("acme", Some(&key)).await?;
+                Ok(Signed { who: "key".into(), expires_at: None })
+            }
+        },
+        |_| async { Ok(()) },
+    );
 }
 
 fn status(accounts: &Value, id: &str) -> (String, Value) {
@@ -27,42 +39,36 @@ fn status(accounts: &Value, id: &str) -> (String, Value) {
 }
 
 #[tokio::test]
-async fn an_api_key_signs_in_and_stays_out_of_the_chat() {
-    let core = Arc::new(core().ext("acme", acme_key).env("OTHER_KEY", "from-env").start().await);
+async fn a_secret_answer_stays_out_of_the_chat() {
+    let core = Arc::new(core().ext("acme", acme_key).start().await);
     let chat = core.chat("1");
     let login = || {
         let core = core.clone();
         tokio::spawn(async move { core.call_in("1", "login", json!({"account": "acme"})).await })
     };
 
-    // A key the extension refuses is not kept.
+    // A sign-in the extension fails leaves the account signed out.
     let attempt = login();
     chat.wait_for("🔑 Send your API key for Acme.").await;
     chat.say("bad");
     let refused = attempt.await.unwrap().unwrap_err().to_string();
-    assert!(refused.contains("the key was not accepted") && refused.contains("401"), "{refused}");
-    assert_eq!(secret(&core, "acme", "acme"), None);
+    assert!(refused.contains("401"), "{refused}");
+    assert_eq!(status(&core.call("accounts", json!({})).await.unwrap(), "acme").0, "none");
 
     let attempt = login();
     chat.wait_until("the second question", |c| c.texts().iter().filter(|t| t.starts_with("🔑")).count() == 2).await;
     let id = chat.say("sk-test-123");
     attempt.await.unwrap().unwrap();
     assert_eq!(secret(&core, "acme", "acme").as_deref(), Some("sk-test-123"));
-    // The key doesn't stay readable in the chat: the message is deleted, the question says
-    // it was received.
+    // The answer doesn't stay readable in the chat: the message is deleted, the question
+    // says it was received.
     assert!(core.messenger.deleted().contains(&id));
     assert!(chat.history().iter().all(|t| !t.contains("sk-test-123")), "{:?}", chat.history());
     assert!(chat.texts().iter().any(|t| t.ends_with("→ received")));
     assert!(core.requests().is_empty(), "the key reached a turn");
+    assert_eq!(status(&core.call("accounts", json!({})).await.unwrap(), "acme"), ("connected".into(), json!("key")));
 
-    // Accounts tell how they stand; a variable can stand in for a key.
-    let accounts = core.call("accounts", json!({})).await.unwrap();
-    assert_eq!(status(&accounts, "acme").0, "connected");
-    assert_eq!(status(&accounts, "other"), ("connected".into(), json!("key from $OTHER_KEY")));
-
-    // Signing out forgets the key; /stop cancels a sign-in in progress.
-    core.call("logout", json!({"account": "acme"})).await.unwrap();
-    assert_eq!(secret(&core, "acme", "acme"), None);
+    // /stop cancels a sign-in in progress.
     let attempt = login();
     chat.wait_until("a third question", |c| c.texts().iter().filter(|t| t.starts_with("🔑")).count() == 3).await;
     core.call_in(&chat.thread, "stop", json!({})).await.unwrap();

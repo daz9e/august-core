@@ -10,6 +10,8 @@ pub mod fake;
 pub mod llm;
 pub mod messenger;
 pub mod os;
+#[cfg(test)]
+mod tests;
 
 pub use chunk::split_markdown;
 pub use fake::FakeAugust;
@@ -83,23 +85,22 @@ impl Stream {
 }
 
 /// Something a user signs in to (a model provider's account, a service an extension
-/// uses). August runs the sign-in and keeps its secrets; the extension only scripts it.
+/// uses). The extension scripts the sign-in; August shows its steps and keeps its secrets.
 struct Account {
     id: String,
     label: String,
     /// Model providers it unlocks (after `/login` August switches to the first).
     providers: Vec<String>,
-    /// Signed in with an API key August asks for: `(what to ask, env var that stands in)`.
-    key: Option<(String, Option<String>)>,
-    check: Option<CheckFn>,
+    /// Signed in with an API key the SDK asks for: what to ask, the variable that stands in
+    /// for it, and the check that accepts it.
+    key: Option<(String, Option<String>, CheckFn)>,
     login: Option<LoginFn>,
     logout: Option<LogoutFn>,
 }
 
 impl Account {
     fn manifest(&self) -> Value {
-        let key = self.key.as_ref().map(|(label, env)| json!({"label": label, "env": env}));
-        json!({"id": self.id, "label": self.label, "providers": self.providers, "key": key, "login": self.login.is_some()})
+        json!({"id": self.id, "label": self.label, "providers": self.providers})
     }
 }
 
@@ -636,17 +637,17 @@ impl August {
         self.changed();
     }
 
-    /// An account signed in to with an API key: August asks for it (`/login`), runs `check(account,
-    /// key)` (an error rejects it) and keeps it; read it with `secret(account)`. `env`: a
-    /// variable that stands in for it.
+    /// An account signed in to with an API key: `/login` asks for it, runs `check(account, key)`
+    /// (an error rejects it) and keeps it as secret `account`; read it with `secret(account)`.
+    /// `env`: a variable that stands in for it. On start the SDK tells August how it stands.
     pub fn register_key_account<F, R>(&self, id: &str, label: &str, providers: &[&str], ask: &str, env: Option<&str>, check: F)
     where
         F: Fn(String, String) -> R + Send + Sync + 'static,
         R: Future<Output = Result<()>> + Send + 'static,
     {
         let check: CheckFn = Arc::new(move |a, k| Box::pin(check(a, k)));
-        let key = Some((ask.to_string(), env.map(String::from)));
-        self.add_account(Account { id: id.into(), label: label.into(), providers: providers.iter().map(|p| p.to_string()).collect(), key, check: Some(check), login: None, logout: None });
+        let key = Some((ask.to_string(), env.map(String::from), check));
+        self.add_account(Account { id: id.into(), label: label.into(), providers: providers.iter().map(|p| p.to_string()).collect(), key, login: None, logout: None });
     }
 
     /// An account with a sign-in of its own (OAuth, a device code, ...): `login(account, steps)`
@@ -661,7 +662,7 @@ impl August {
     {
         let login: LoginFn = Arc::new(move |a, l| Box::pin(login(a, l)));
         let logout: LogoutFn = Arc::new(move |a| Box::pin(logout(a)));
-        self.add_account(Account { id: id.into(), label: label.into(), providers: providers.iter().map(|p| p.to_string()).collect(), key: None, check: None, login: Some(login), logout: Some(logout) });
+        self.add_account(Account { id: id.into(), label: label.into(), providers: providers.iter().map(|p| p.to_string()).collect(), key: None, login: Some(login), logout: Some(logout) });
     }
 
     fn add_account(&self, account: Account) {
@@ -670,6 +671,29 @@ impl August {
         accounts.push(account);
         drop(accounts);
         self.changed();
+        if self.0.started.load(Ordering::SeqCst) {
+            self.report_keys();
+        }
+    }
+
+    /// Tells August how the key accounts stand: a variable stands in for the key, a key is
+    /// kept, or neither.
+    fn report_keys(&self) {
+        let keys: Vec<(String, Option<String>)> = self.0.accounts.read().unwrap().iter().filter_map(|a| Some((a.id.clone(), a.key.as_ref()?.1.clone()))).collect();
+        let me = self.clone();
+        tokio::spawn(async move {
+            for (id, env) in keys {
+                let (status, who) = match env.filter(|e| me.env(e).is_some()) {
+                    Some(env) => ("connected", Some(format!("key from ${env}"))),
+                    None => match me.secret(&id).await {
+                        Ok(Some(_)) => ("connected", None),
+                        Ok(None) => ("none", None),
+                        Err(_) => continue,
+                    },
+                };
+                me.0.link.call("account_update", json!({"account": id, "status": status, "who": who})).await.ok();
+            }
+        });
     }
 
     pub fn unregister_account(&self, id: &str) {
@@ -912,16 +936,21 @@ impl August {
                 let reply = run(params["args"].as_str().unwrap_or_default().to_string(), ctx).await?;
                 Ok(reply.map(Value::String).unwrap_or(Value::Null))
             }
-            "account_check" | "login" | "logout" => {
+            "login" | "logout" => {
                 let id = params["account"].as_str().unwrap_or_default().to_string();
-                let account = self.0.accounts.read().unwrap().iter().find(|a| a.id == id).map(|a| (a.check.clone(), a.login.clone(), a.logout.clone()));
-                let (check, login, logout) = account.ok_or_else(|| anyhow!("no account named {id}"))?;
-                match (method, check, login, logout) {
-                    ("account_check", Some(check), ..) => check(id, params["key"].as_str().unwrap_or_default().to_string()).await.map(|_| Value::Null),
-                    ("account_check", None, ..) => Ok(Value::Null),
+                let account = self.0.accounts.read().unwrap().iter().find(|a| a.id == id).map(|a| (a.label.clone(), a.key.clone(), a.login.clone(), a.logout.clone()));
+                let (label, key, login, logout) = account.ok_or_else(|| anyhow!("no account named {id}"))?;
+                let steps = Login { link: ctx.link.clone(), session: params["session"].as_u64().unwrap_or(0) };
+                match (method, key, login, logout) {
+                    ("login", Some((ask, _, check)), ..) => {
+                        let key = steps.ask(&format!("Send your {ask} for {label}."), true).await?;
+                        check(id.clone(), key.clone()).await.map_err(|e| anyhow!("the key was not accepted: {e:#}"))?;
+                        self.set_secret(&id, Some(&key)).await?;
+                        Ok(json!({"who": null}))
+                    }
+                    ("logout", Some(_), ..) => self.set_secret(&id, None).await.map(|_| Value::Null),
                     ("login", _, Some(login), _) => {
-                        let session = Login { link: ctx.link.clone(), session: params["session"].as_u64().unwrap_or(0) };
-                        let signed = login(id, session).await?;
+                        let signed = login(id, steps).await?;
                         Ok(json!({"who": signed.who, "expires_at": signed.expires_at}))
                     }
                     ("logout", _, _, Some(logout)) => logout(id).await.map(|_| Value::Null),
@@ -998,6 +1027,7 @@ impl August {
         });
         link.write(&json!({"method": "ready", "params": self.manifest()}));
         self.0.started.store(true, Ordering::SeqCst);
+        self.report_keys();
         let mut lines = BufReader::new(read).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };

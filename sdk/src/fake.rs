@@ -84,6 +84,7 @@ struct State {
     manifest: Option<Value>,
     calls: Vec<(String, Value)>,
     store: BTreeMap<String, Value>,
+    secrets: BTreeMap<String, String>,
     settings: Value,
     sent: Vec<Sent>,
     answers: HashMap<String, Answer>,
@@ -184,6 +185,15 @@ impl FakeAugust {
                 match &p["value"] {
                     Value::Null => s.store.remove(&k),
                     v => s.store.insert(k, v.clone()),
+                };
+                Value::Null
+            }
+            "secret_get" => json!(s.secrets.get(p["key"].as_str().unwrap_or(""))),
+            "secret_set" => {
+                let k = p["key"].as_str().unwrap_or("").to_string();
+                match p["value"].as_str() {
+                    Some(v) => s.secrets.insert(k, v.into()),
+                    None => s.secrets.remove(&k),
                 };
                 Value::Null
             }
@@ -396,6 +406,16 @@ impl FakeAugust {
     /// The value in the extension's store at `key`.
     pub fn stored(&self, key: &str) -> Option<Value> {
         self.0.state.lock().unwrap().store.get(key).cloned()
+    }
+
+    /// The extension's secret `key`.
+    pub fn secret(&self, key: &str) -> Option<String> {
+        self.0.state.lock().unwrap().secrets.get(key).cloned()
+    }
+
+    /// Keeps secret `key` for the extension, as if kept before it started.
+    pub fn secret_set(&self, key: &str, value: &str) {
+        self.0.state.lock().unwrap().secrets.insert(key.into(), value.into());
     }
 
     /// Waits until `done` holds; panics after a while.

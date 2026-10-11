@@ -936,7 +936,7 @@ impl Extensions {
         self.running().iter().flat_map(|(name, h)| h.manifest().accounts.iter().map(|a| (name.clone(), a.clone())).collect::<Vec<_>>()).collect()
     }
 
-    /// Calls `method` (`account_check`, `login`, `logout`) of extension `ext` for an account.
+    /// Calls `method` (`login`, `logout`) of extension `ext` for an account.
     pub async fn call_account(&self, ext: &str, method: &str, params: Value, chat: &Origin) -> Result<Value, String> {
         let host = self.running().into_iter().find(|(n, _)| n == ext).map(|(_, h)| h).ok_or_else(|| format!("extension {ext} is not running"))?;
         let mut params = params;

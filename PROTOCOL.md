@@ -252,7 +252,7 @@ Rules:
 | `command` | `{name, args, ctx}` | the reply text, or `null` for none | the extension offering the command |
 | `health` | `{}` | `{status: "ok"\|"degraded"\|"failed", detail?}` | every running extension (§12) |
 | `cancel` | `{id}` (notification) | — | §1 |
-| `account_check`, `login`, `logout` | §11 | §11 | extensions with accounts |
+| `login`, `logout` | §11 | §11 | extensions with accounts |
 | `complete`, `models` | §10 | §10 | extensions with providers |
 | `messenger_*` | §9 | §9 | extensions with messengers |
 
@@ -274,7 +274,7 @@ skipped, a tool or command fails.
 | `event` `render` (§8) | 10 s, or `timeouts.render` |
 | `tool`, `command` | 10 min |
 | `health` | `ping_timeout_ms` (10 s) |
-| `account_check`, `login`, `logout` | 15 min |
+| `login`, `logout` | 15 min |
 | `complete`, `models` | 10 min |
 | `messenger_*` | 60 s; 5 min for `messenger_send` with files and for `messenger_download` |
 
@@ -282,7 +282,7 @@ August's operations (§6) have no timeout of their own; some take a `timeout_ms`
 
 ### 5.2 `ctx`
 
-`event`, `tool`, `command`, `account_check`, `login` and `logout` carry `ctx`, which says
+`event`, `tool`, `command`, `login` and `logout` carry `ctx`, which says
 where the call comes from:
 
 ```json
@@ -813,30 +813,26 @@ With no `default_model`, the provider's default is the first model it lists.
 
 ## 11. Accounts and sign-in
 
-An extension declares the accounts it signs in to; August runs every sign-in and keeps the
-secrets. The extension only scripts the steps.
+An extension declares the accounts it signs in to and scripts every sign-in (an API key,
+OAuth, a device code, ...); August shows the steps, receives redirects and keeps the
+secrets.
 
 ```json
 "accounts": [
-  {"id": "anthropic", "label": "Anthropic", "providers": ["anthropic"], "key": {"label": "API key", "env": "ANTHROPIC_API_KEY"}, "login": false},
-  {"id": "chatgpt", "label": "ChatGPT", "providers": ["chatgpt"], "key": null, "login": true}
+  {"id": "anthropic", "label": "Anthropic", "providers": ["anthropic"]},
+  {"id": "chatgpt", "label": "ChatGPT", "providers": ["chatgpt"]}
 ]
 ```
 
 `providers` are the model providers the account unlocks; after `/login`, August switches to
 the first one.
 
-**Key accounts** (`key` set):
+An API key is a sign-in like any other: ask for it with `login_ask {secret: true}`, check
+it, keep it with `secret_set`, and tell how the account stands on start with
+`account_update` (e.g. `connected` while a variable stands in for the key). The SDKs do
+this for you (`register_key_account`).
 
-1. On `/login <id>`, August asks the user for `key.label` in the thread, and deletes the
-   answer from the chat.
-2. It calls `account_check {account, key, ctx}`; an error reply rejects the key.
-3. It keeps the key as the extension's secret under the account's id (`secret_get
-   {key: "<account id>"}`).
-4. The account counts as connected while that secret exists, or while the `key.env`
-   variable is set (which then stands in for it).
-
-**Login accounts** (`login: true`):
+**Signing in**:
 
 1. August calls `login {account, session, ctx}` and waits up to 15 min.
 2. The extension drives the sign-in with steps that name that `session`. Each step shows in
@@ -855,13 +851,14 @@ the first one.
 3. The extension replies `{who, expires_at?}`. August records the account as connected by
    `who`. Keep tokens with `secret_set`.
 
-**`logout {account, ctx}`**: forget what you keep. For key accounts August deletes the key
-itself.
+**`logout {account, ctx}`**: forget what you keep. August then records the account as
+`none`.
 
 **`account_update {account, status: "none"|"connected"|"expired", who?}`**: tell August how
-your account stands. `expired` tells the user in the home thread to sign in again.
+your account stands, also while you are still starting. `expired` tells the user in the
+home thread to sign in again.
 
-**`accounts`** (`admin`) → `[{id, label, extension, providers, kind: "key"|"login", status, who}]`.
+**`accounts`** (`admin`) → `[{id, label, extension, providers, status, who}]`.
 `login {account, thread}` and `logout {account}` (`admin`) run the same flows for another
 extension (e.g. the `/login` command).
 

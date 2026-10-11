@@ -428,7 +428,7 @@
     "name": "accounts",
     "permission": "admin",
     "params": [],
-    "about": "Every account extensions sign in to: {id, label, extension, providers, kind: key|login, status: none|connected|expired, who}"
+    "about": "Every account extensions sign in to: {id, label, extension, providers, status: none|connected|expired, who}"
   },
   {
     "name": "login",
