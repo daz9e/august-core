@@ -1,11 +1,11 @@
 //! Runs August as a background service that starts at login and is restarted when it
 //! crashes (not when it stops cleanly: `august stop`, `restart`): a launchd agent on macOS,
-//! a systemd user unit on Linux. Or, without the service, on its own in the background.
+//! a systemd user unit on Linux, a scheduled task running `august supervise` on Windows. Or,
+//! without the service, on its own in the background.
 
 use crate::config;
 use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
-use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 const LABEL: &str = "dev.august.agent";
@@ -20,6 +20,9 @@ const UNIT: &str = "august.service";
 /// Whether `august serve` installed the background service for this `AUGUST_HOME` (one
 /// installed for another home is not this August's to stop or restart).
 pub fn installed() -> bool {
+    if cfg!(windows) {
+        return Command::new("schtasks").args(["/Query", "/TN", &task()]).output().is_ok_and(|o| o.status.success());
+    }
     let file = if cfg!(target_os = "macos") { plist_path() } else { unit_path() };
     let home = config::home().display().to_string();
     std::fs::read_to_string(file).is_ok_and(|f| f.contains(&format!("AUGUST_HOME</key><string>{}<", xml(&home))) || f.contains(&format!("AUGUST_HOME={home}\"")))
@@ -42,7 +45,7 @@ fn run(cmd: &mut Command) -> Result<()> {
 }
 
 fn home_dir() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+    std::env::home_dir().unwrap_or_else(|| ".".into())
 }
 
 fn plist_path() -> PathBuf {
@@ -51,6 +54,12 @@ fn plist_path() -> PathBuf {
 
 fn unit_path() -> PathBuf {
     home_dir().join(".config/systemd/user").join(UNIT)
+}
+
+/// The Windows task, one per `AUGUST_HOME`.
+fn task() -> String {
+    let home: String = config::home().to_string_lossy().chars().map(|c| if matches!(c, '\\' | '/' | ':') { '_' } else { c }).collect();
+    format!("{} {home}", label())
 }
 
 fn xml(s: &str) -> String {
@@ -66,7 +75,45 @@ pub fn start() -> Result<()> {
     std::fs::create_dir_all(log.parent().unwrap())?;
     let path = std::env::var("PATH").unwrap_or_default();
 
-    if cfg!(target_os = "macos") {
+    if cfg!(windows) {
+        // `conhost --headless`: a task's console program would get a window.
+        let user = format!("{}\\{}", std::env::var("USERDOMAIN").unwrap_or_default(), std::env::var("USERNAME").unwrap_or_default());
+        let definition = format!(
+            r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>August agent</Description></RegistrationInfo>
+  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{user}</UserId></LogonTrigger></Triggers>
+  <Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>Queue</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>5</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>%SystemRoot%\System32\conhost.exe</Command>
+      <Arguments>--headless "{exe}" supervise "{home}"</Arguments>
+      <WorkingDirectory>{dir}</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"#,
+            user = xml(&user),
+            exe = xml(&exe.to_string_lossy()),
+            home = xml(&config::home().to_string_lossy()),
+            dir = xml(&dir.to_string_lossy()),
+        );
+        // schtasks reads the file as UTF-16.
+        let file = config::home().join("august-task.xml");
+        let bytes: Vec<u8> = [0xFF, 0xFE].into_iter().chain(definition.encode_utf16().flat_map(u16::to_le_bytes)).collect();
+        std::fs::write(&file, bytes)?;
+        let made = run(Command::new("schtasks").args(["/Create", "/F", "/TN", &task()]).arg("/XML").arg(&file));
+        std::fs::remove_file(&file).ok();
+        made?;
+        run(Command::new("schtasks").args(["/Run", "/TN", &task()]))?;
+    } else if cfg!(target_os = "macos") {
         let plist = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -164,7 +211,10 @@ fn user_systemd() -> bool {
 
 /// Starts the installed service again.
 pub fn kick() -> Result<()> {
-    if cfg!(target_os = "macos") {
+    if cfg!(windows) {
+        // Queued until the last run has ended.
+        run(Command::new("schtasks").args(["/Run", "/TN", &task()]))
+    } else if cfg!(target_os = "macos") {
         run(Command::new("launchctl").args(["kickstart", &format!("gui/{}/{}", uid()?, label())]))
     } else {
         run(Command::new("systemctl").args(["--user", "restart", UNIT]))
@@ -173,24 +223,45 @@ pub fn kick() -> Result<()> {
 
 /// Starts August on its own in the background (`august serve` keeps it running at login).
 pub fn spawn() -> Result<()> {
+    gateway()?.spawn().context("could not start August")?;
+    Ok(())
+}
+
+/// What the Windows task runs: August, started again 5 s after it crashes (not when it
+/// stops cleanly), like launchd and systemd do elsewhere.
+pub fn supervise() -> Result<()> {
+    loop {
+        if gateway()?.status().context("could not start August")?.success() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
+}
+
+/// `august gateway` in the background, its output in the log.
+fn gateway() -> Result<Command> {
     let log = log_path();
     std::fs::create_dir_all(log.parent().unwrap_or(&log))?;
     let out = std::fs::OpenOptions::new().create(true).append(true).open(&log)?;
-    Command::new(std::env::current_exe()?)
-        .arg("gateway")
-        .stdin(std::process::Stdio::null())
-        .stdout(out.try_clone()?)
-        .stderr(out)
-        // Its own process group, so closing this terminal doesn't stop it.
-        .process_group(0)
-        .spawn()
-        .context("could not start August")?;
-    Ok(())
+    let mut cmd = Command::new(std::env::current_exe()?);
+    cmd.arg("gateway").stdin(std::process::Stdio::null()).stdout(out.try_clone()?).stderr(out);
+    // Its own process group, so closing this terminal doesn't stop it.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    // And no window: a hidden console of its own, which its extensions share.
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut cmd, 0x200 | 0x0800_0000); // CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+    Ok(cmd)
 }
 
 /// Stops the service (if still running) and removes it from autostart.
 pub fn uninstall() -> Result<()> {
-    if cfg!(target_os = "macos") {
+    if cfg!(windows) {
+        if !installed() {
+            bail!("service is not installed");
+        }
+        run(Command::new("schtasks").args(["/Delete", "/F", "/TN", &task()]))?;
+    } else if cfg!(target_os = "macos") {
         let file = plist_path();
         if !file.exists() {
             bail!("service is not installed");
@@ -216,7 +287,11 @@ pub fn logs() -> Result<()> {
     if !log.exists() {
         bail!("no log yet: {}", log.display());
     }
-    Command::new("tail").args(["-n", "100", "-f"]).arg(log).status()?;
+    if cfg!(windows) {
+        Command::new("powershell").args(["-NoProfile", "-Command", "Get-Content -Tail 100 -Wait -LiteralPath $args[0]"]).arg(log).status()?;
+    } else {
+        Command::new("tail").args(["-n", "100", "-f"]).arg(log).status()?;
+    }
     Ok(())
 }
 

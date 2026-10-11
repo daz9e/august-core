@@ -25,6 +25,14 @@ pub fn main() -> Result<()> {
         // SAFETY: before the runtime starts, no other thread reads the environment.
         unsafe { std::env::set_var("PATH", path) };
     }
+    // `supervise <home>`: the Windows task can't set the environment.
+    let args: Vec<String> = std::env::args().collect();
+    if let [_, cmd, home] = &args[..]
+        && cmd == "supervise"
+    {
+        // SAFETY: before the runtime starts, no other thread reads the environment.
+        unsafe { std::env::set_var("AUGUST_HOME", home) };
+    }
     tokio::runtime::Runtime::new()?.block_on(run())
 }
 
@@ -34,6 +42,7 @@ async fn run() -> Result<()> {
     match cmd {
         // Foreground; this is what `serve` and the background service run.
         "gateway" => gateway::serve().await,
+        "supervise" => cli::service::supervise(),
         "help" | "--help" | "-h" => cli::help().await,
         "serve" => cli::serve().await,
         "stop" => cli::stop().await,

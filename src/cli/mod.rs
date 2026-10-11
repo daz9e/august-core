@@ -7,10 +7,9 @@ use crate::config;
 use crate::gateway::control;
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
-use std::os::unix::process::CommandExt;
+use august_ext::os;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 
 /// How long August may take to start or stop.
 const WAIT: Duration = Duration::from_secs(30);
@@ -29,13 +28,13 @@ fn socket() -> std::path::PathBuf {
 }
 
 async fn running() -> bool {
-    UnixStream::connect(socket()).await.is_ok()
+    os::connect(&socket()).await.is_ok()
 }
 
 /// One request to the running core.
 async fn request(req: Value) -> Result<Value> {
-    let stream = UnixStream::connect(socket()).await.context("August is not running")?;
-    let (read, mut write) = stream.into_split();
+    let stream = os::connect(&socket()).await.context("August is not running")?;
+    let (read, mut write) = tokio::io::split(stream);
     write.write_all(format!("{req}\n").as_bytes()).await?;
     let line = BufReader::new(read).lines().next_line().await?.ok_or_else(|| anyhow!("August went away"))?;
     let reply: Value = serde_json::from_str(&line)?;
@@ -96,8 +95,9 @@ pub async fn help() -> Result<()> {
 }
 
 pub async fn serve() -> Result<()> {
-    // One started on its own gives way to the service.
-    if running().await && !service::installed() {
+    // One started on its own gives way to the service; so does the Windows task, which
+    // doesn't restart what is running.
+    if running().await && (!service::installed() || cfg!(windows)) {
         shut_down("restart").await?;
     }
     service::start()
@@ -146,12 +146,19 @@ pub async fn open(name: &str, args: &[String]) -> Result<()> {
     };
     let exec: Vec<String> = serde_json::from_value(found["exec"].clone())?;
     let (program, rest) = exec.split_first().ok_or_else(|| anyhow!("`{name}` has nothing to run"))?;
-    let err = std::process::Command::new(program)
-        .args(rest)
-        .args(args)
-        .env("AUGUST_SOCKET", socket())
-        .env("AUGUST_TOKEN", found["token"].as_str().unwrap_or_default())
-        .exec();
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(rest).args(args).env("AUGUST_SOCKET", socket()).env("AUGUST_TOKEN", found["token"].as_str().unwrap_or_default());
+    #[cfg(unix)]
+    let err = std::os::unix::process::CommandExt::exec(&mut cmd);
+    #[cfg(windows)]
+    let err = {
+        // No exec on Windows: wait for it, leaving Ctrl+C to it.
+        let _ctrl_c = tokio::signal::windows::ctrl_c()?;
+        match cmd.status() {
+            Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+            Err(e) => e,
+        }
+    };
     Err(anyhow!("could not run {program}: {err}"))
 }
 
