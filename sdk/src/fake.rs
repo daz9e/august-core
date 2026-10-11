@@ -3,6 +3,8 @@
 //! run), sends it events, tool calls, commands and any other request as the core would,
 //! records every call the extension makes, and answers them: the store, messages and
 //! settings out of the box, everything else as the test scripts it (`on`), `null` if not.
+//! A call the core would refuse (an unknown operation, a parameter it doesn't take or a
+//! missing one, by the core's table `ops.json`) fails as it would there.
 
 use crate::{August, Button};
 use anyhow::{Result, anyhow};
@@ -17,6 +19,23 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
 type Answer = Arc<dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value>> + Send>> + Send + Sync>;
+
+/// The core's operations, as its `ops` gives them.
+static OPS: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| serde_json::from_str(include_str!("../ops.json")).expect("ops.json"));
+
+/// Fails as the core does on a call its table doesn't allow.
+fn check(method: &str, p: &Value) -> Result<()> {
+    let op = OPS.as_array().into_iter().flatten().find(|o| o["name"] == method).ok_or_else(|| anyhow!("unknown operation `{method}`"))?;
+    let params = op["params"].as_array().cloned().unwrap_or_default();
+    for key in p.as_object().into_iter().flatten().map(|(k, _)| k) {
+        let common = ["as_user", "from_turn", "thread"].contains(&key.as_str());
+        anyhow::ensure!(common || params.iter().any(|q| q["name"] == *key), "`{method}` takes no `{key}`");
+    }
+    if let Some(missing) = params.iter().find(|q| q["required"] == true && p[q["name"].as_str().unwrap_or("")].is_null()) {
+        anyhow::bail!("`{method}` needs `{}`", missing["name"].as_str().unwrap_or(""));
+    }
+    Ok(())
+}
 
 /// The messenger threads of `ctx` and `thread` belong to.
 pub const MESSENGER: &str = "test";
@@ -147,6 +166,7 @@ impl FakeAugust {
 
     /// A call of the extension into August: recorded, then answered.
     async fn serve(&self, method: &str, p: Value) -> Result<Value> {
+        check(method, &p)?;
         let answer = {
             let mut s = self.0.state.lock().unwrap();
             s.calls.push((method.to_string(), p.clone()));

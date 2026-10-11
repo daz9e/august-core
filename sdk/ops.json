@@ -1,0 +1,943 @@
+[
+  {
+    "name": "ops",
+    "permission": null,
+    "params": [],
+    "about": "Every operation: {name, permission, params: [{name, required}], about}"
+  },
+  {
+    "name": "tools",
+    "permission": null,
+    "params": [],
+    "about": "Every agent tool: {name, description, parameters, owner}"
+  },
+  {
+    "name": "commands",
+    "permission": null,
+    "params": [],
+    "about": "Every slash command: {name, description, owner}"
+  },
+  {
+    "name": "status",
+    "permission": null,
+    "params": [
+      {
+        "name": "thread",
+        "required": false
+      }
+    ],
+    "about": "{provider, model, workspace, busy} (busy: of `thread`, if given)"
+  },
+  {
+    "name": "messengers",
+    "permission": "messaging",
+    "params": [],
+    "about": "Every messenger with its capabilities, notes, actions and threads (each with its place: dm|group|channel|thread, parent, title)"
+  },
+  {
+    "name": "send",
+    "permission": "messaging",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "message",
+        "required": true
+      }
+    ],
+    "about": "Send {thread, message}; returns its id"
+  },
+  {
+    "name": "edit",
+    "permission": "messaging",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "id",
+        "required": true
+      },
+      {
+        "name": "message",
+        "required": true
+      }
+    ],
+    "about": "Replace a sent message {thread, id, message}"
+  },
+  {
+    "name": "delete",
+    "permission": "messaging",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "id",
+        "required": true
+      }
+    ],
+    "about": "Delete a sent message {thread, id}"
+  },
+  {
+    "name": "react",
+    "permission": "messaging",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "id",
+        "required": true
+      },
+      {
+        "name": "emoji",
+        "required": false
+      }
+    ],
+    "about": "React to a message {thread, id, emoji}"
+  },
+  {
+    "name": "open_thread",
+    "permission": "messaging",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "title",
+        "required": true
+      }
+    ],
+    "about": "Open a thread titled {title} inside {thread} (where the messenger can `open_thread`); returns the new thread"
+  },
+  {
+    "name": "action",
+    "permission": "messaging",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "action",
+        "required": true
+      },
+      {
+        "name": "args",
+        "required": false
+      }
+    ],
+    "about": "Run one of the messenger's described {action}s in {thread} with {args} (checked against its schema); returns its result"
+  },
+  {
+    "name": "download",
+    "permission": "messaging",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "file",
+        "required": true
+      },
+      {
+        "name": "path",
+        "required": true
+      }
+    ],
+    "about": "Save attachment {file} of a message in {thread} (one of `message_in`'s `files`) to {path} (relative: in the workspace); returns {path, size}"
+  },
+  {
+    "name": "inbound",
+    "permission": null,
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "user",
+        "required": true
+      },
+      {
+        "name": "place",
+        "required": false
+      },
+      {
+        "name": "kind",
+        "required": true
+      },
+      {
+        "name": "id",
+        "required": false
+      },
+      {
+        "name": "text",
+        "required": false
+      },
+      {
+        "name": "files",
+        "required": false
+      },
+      {
+        "name": "reply_to",
+        "required": false
+      },
+      {
+        "name": "addressed",
+        "required": false
+      },
+      {
+        "name": "name",
+        "required": false
+      },
+      {
+        "name": "args",
+        "required": false
+      },
+      {
+        "name": "button",
+        "required": false
+      },
+      {
+        "name": "message",
+        "required": false
+      },
+      {
+        "name": "emoji",
+        "required": false
+      }
+    ],
+    "about": "Hand in what came to {thread} of a messenger you offer from {user: {id, name}} at {place: {kind: dm|group|channel|thread, parent, title}}: {kind: message|edited|command|press|reaction, ...}"
+  },
+  {
+    "name": "listen",
+    "permission": "messaging",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "buttons",
+        "required": false
+      },
+      {
+        "name": "text",
+        "required": false
+      },
+      {
+        "name": "secret",
+        "required": false
+      },
+      {
+        "name": "ttl_ms",
+        "required": false
+      }
+    ],
+    "about": "Listen in {thread} for {buttons, text}; returns a listener id. With {secret} a text taken is deleted from the chat"
+  },
+  {
+    "name": "next",
+    "permission": "messaging",
+    "params": [
+      {
+        "name": "listener",
+        "required": true
+      },
+      {
+        "name": "timeout_ms",
+        "required": false
+      }
+    ],
+    "about": "What {listener} took"
+  },
+  {
+    "name": "prompt",
+    "permission": "messaging",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "text",
+        "required": true
+      },
+      {
+        "name": "source",
+        "required": false
+      },
+      {
+        "name": "deliver",
+        "required": false
+      }
+    ],
+    "about": "Hand {thread} a message as if the user sent it"
+  },
+  {
+    "name": "turn_start",
+    "permission": "turns",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "turn",
+        "required": true
+      }
+    ],
+    "about": "Start a turn {thread, turn: {text, conversation: thread|copy|new, show, source, parent, ...}}; returns its id"
+  },
+  {
+    "name": "turn_wait",
+    "permission": "turns",
+    "params": [
+      {
+        "name": "id",
+        "required": true
+      },
+      {
+        "name": "timeout_ms",
+        "required": false
+      }
+    ],
+    "about": "A turn's outcome {id, timeout_ms}"
+  },
+  {
+    "name": "turn_cancel",
+    "permission": "turns",
+    "params": [
+      {
+        "name": "id",
+        "required": true
+      }
+    ],
+    "about": "Cancel turn {id}"
+  },
+  {
+    "name": "turns",
+    "permission": "turns",
+    "params": [
+      {
+        "name": "thread",
+        "required": false
+      }
+    ],
+    "about": "Running turns, of {thread} or all"
+  },
+  {
+    "name": "stop",
+    "permission": "turns",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      }
+    ],
+    "about": "Stop everything running in {thread}, like /stop"
+  },
+  {
+    "name": "callTool",
+    "permission": "tools",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "name",
+        "required": true
+      },
+      {
+        "name": "input",
+        "required": false
+      }
+    ],
+    "about": "Run an agent tool {thread, name, input}"
+  },
+  {
+    "name": "llm",
+    "permission": "llm",
+    "params": [
+      {
+        "name": "prompt",
+        "required": false
+      },
+      {
+        "name": "messages",
+        "required": false
+      },
+      {
+        "name": "system",
+        "required": false
+      },
+      {
+        "name": "effort",
+        "required": false
+      },
+      {
+        "name": "options",
+        "required": false
+      },
+      {
+        "name": "thread",
+        "required": false
+      }
+    ],
+    "about": "One completion without tools: {prompt} or {messages}, {system}, {effort}, {options} (fields of the provider's request body); in {thread}'s conversation's model, counted in its usage"
+  },
+  {
+    "name": "model_set",
+    "permission": "models",
+    "params": [
+      {
+        "name": "model",
+        "required": true
+      }
+    ],
+    "about": "Switch to {model} of the current provider, or `provider:model` (`provider:` for its default)"
+  },
+  {
+    "name": "providers",
+    "permission": "models",
+    "params": [],
+    "about": "Every model provider: {id, label, default_model, extension}"
+  },
+  {
+    "name": "models",
+    "permission": "models",
+    "params": [
+      {
+        "name": "provider",
+        "required": false
+      }
+    ],
+    "about": "The models {provider} offers (default: the active one): [{id, context_window}]"
+  },
+  {
+    "name": "accounts",
+    "permission": "admin",
+    "params": [],
+    "about": "Every account extensions sign in to: {id, label, extension, providers, kind: key|login, status: none|connected|expired, who}"
+  },
+  {
+    "name": "login",
+    "permission": "admin",
+    "params": [
+      {
+        "name": "account",
+        "required": true
+      },
+      {
+        "name": "thread",
+        "required": true
+      }
+    ],
+    "about": "Sign in to {account}, asking in {thread}; returns {who}"
+  },
+  {
+    "name": "logout",
+    "permission": "admin",
+    "params": [
+      {
+        "name": "account",
+        "required": true
+      }
+    ],
+    "about": "Sign out of {account}"
+  },
+  {
+    "name": "account_update",
+    "permission": null,
+    "params": [
+      {
+        "name": "account",
+        "required": true
+      },
+      {
+        "name": "status",
+        "required": true
+      },
+      {
+        "name": "who",
+        "required": false
+      }
+    ],
+    "about": "Tell how your {account} stands: {status: none|connected|expired, who}"
+  },
+  {
+    "name": "secret_get",
+    "permission": null,
+    "params": [
+      {
+        "name": "key",
+        "required": true
+      }
+    ],
+    "about": "Your secret {key} (an account's API key is under the account's id)"
+  },
+  {
+    "name": "secret_set",
+    "permission": null,
+    "params": [
+      {
+        "name": "key",
+        "required": true
+      },
+      {
+        "name": "value",
+        "required": false
+      }
+    ],
+    "about": "Keep your secret {key, value} (null deletes)"
+  },
+  {
+    "name": "login_ask",
+    "permission": null,
+    "params": [
+      {
+        "name": "session",
+        "required": true
+      },
+      {
+        "name": "label",
+        "required": true
+      },
+      {
+        "name": "secret",
+        "required": false
+      }
+    ],
+    "about": "In your sign-in {session}: ask for {label} ({secret}: deleted from the chat); returns the answer"
+  },
+  {
+    "name": "login_choose",
+    "permission": null,
+    "params": [
+      {
+        "name": "session",
+        "required": true
+      },
+      {
+        "name": "question",
+        "required": true
+      },
+      {
+        "name": "options",
+        "required": true
+      }
+    ],
+    "about": "In your sign-in {session}: {question} with {options} as buttons; returns the one picked"
+  },
+  {
+    "name": "login_open",
+    "permission": null,
+    "params": [
+      {
+        "name": "session",
+        "required": true
+      },
+      {
+        "name": "url",
+        "required": true
+      },
+      {
+        "name": "note",
+        "required": false
+      }
+    ],
+    "about": "In your sign-in {session}: show {url} to open, with {note}"
+  },
+  {
+    "name": "login_progress",
+    "permission": null,
+    "params": [
+      {
+        "name": "session",
+        "required": true
+      },
+      {
+        "name": "text",
+        "required": true
+      }
+    ],
+    "about": "In your sign-in {session}: say {text}"
+  },
+  {
+    "name": "login_callback",
+    "permission": null,
+    "params": [
+      {
+        "name": "session",
+        "required": true
+      },
+      {
+        "name": "port",
+        "required": false
+      },
+      {
+        "name": "path",
+        "required": false
+      }
+    ],
+    "about": "In your sign-in {session}: receive one redirect on localhost {port} (0: any) {path}; returns its address"
+  },
+  {
+    "name": "login_wait",
+    "permission": null,
+    "params": [
+      {
+        "name": "session",
+        "required": true
+      },
+      {
+        "name": "timeout_ms",
+        "required": false
+      }
+    ],
+    "about": "In your sign-in {session}: the redirect's query {timeout_ms} (or the address the user pastes)"
+  },
+  {
+    "name": "sessions",
+    "permission": "sessions",
+    "params": [
+      {
+        "name": "thread",
+        "required": false
+      }
+    ],
+    "about": "Stored conversations, newest first, of {thread} or all: {id, chat, name, settings, messages, bound}"
+  },
+  {
+    "name": "session_new",
+    "permission": "sessions",
+    "params": [
+      {
+        "name": "thread",
+        "required": false
+      },
+      {
+        "name": "name",
+        "required": false
+      },
+      {
+        "name": "settings",
+        "required": false
+      }
+    ],
+    "about": "Start a new conversation in {thread} (none: of no chat, addressed as thread {messenger: \"session\", id}), optionally with {name, settings}; returns its id"
+  },
+  {
+    "name": "session_update",
+    "permission": "sessions",
+    "params": [
+      {
+        "name": "session",
+        "required": true
+      },
+      {
+        "name": "name",
+        "required": false
+      },
+      {
+        "name": "settings",
+        "required": false
+      }
+    ],
+    "about": "Rename {session} ({name}) or change its {settings}: {model, system, tools, sections}, null deletes"
+  },
+  {
+    "name": "session_switch",
+    "permission": "sessions",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "session",
+        "required": true
+      }
+    ],
+    "about": "Continue stored {session} in {thread}"
+  },
+  {
+    "name": "history",
+    "permission": "sessions",
+    "params": [
+      {
+        "name": "session",
+        "required": false
+      },
+      {
+        "name": "thread",
+        "required": false
+      },
+      {
+        "name": "kinds",
+        "required": false
+      },
+      {
+        "name": "since",
+        "required": false
+      },
+      {
+        "name": "limit",
+        "required": false
+      }
+    ],
+    "about": "The journal of {session} (or {thread}'s, or all): entries after {since} of {kinds}, at most {limit} (default 100)"
+  },
+  {
+    "name": "journal_append",
+    "permission": null,
+    "params": [
+      {
+        "name": "type",
+        "required": true
+      },
+      {
+        "name": "data",
+        "required": false
+      },
+      {
+        "name": "session",
+        "required": false
+      },
+      {
+        "name": "thread",
+        "required": false
+      }
+    ],
+    "about": "Record {type, data} in the journal of {session} or {thread}'s (kind `custom`, caller you)"
+  },
+  {
+    "name": "messages",
+    "permission": "sessions",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      }
+    ],
+    "about": "The live conversation of {thread} (what the model sees next): {session, messages, tokens, window}"
+  },
+  {
+    "name": "messages_set",
+    "permission": "sessions",
+    "params": [
+      {
+        "name": "thread",
+        "required": true
+      },
+      {
+        "name": "messages",
+        "required": true
+      }
+    ],
+    "about": "Replace the live conversation of {thread} with {messages} (earlier ones stay searchable)"
+  },
+  {
+    "name": "search",
+    "permission": "sessions",
+    "params": [
+      {
+        "name": "query",
+        "required": true
+      },
+      {
+        "name": "limit",
+        "required": false
+      }
+    ],
+    "about": "Full-text search over everything said in any conversation: {query, limit} → [{at, role, text}]"
+  },
+  {
+    "name": "extensions",
+    "permission": "admin",
+    "params": [],
+    "about": "Every extension with its state and what it registers"
+  },
+  {
+    "name": "extension_enable",
+    "permission": "admin",
+    "params": [
+      {
+        "name": "name",
+        "required": true
+      }
+    ],
+    "about": "(Re)start {name} and keep it enabled; returns its status line, fails with its error"
+  },
+  {
+    "name": "extension_disable",
+    "permission": "admin",
+    "params": [
+      {
+        "name": "name",
+        "required": true
+      }
+    ],
+    "about": "Stop {name} and keep it disabled"
+  },
+  {
+    "name": "extensions_reload",
+    "permission": "admin",
+    "params": [],
+    "about": "Restart every extension but the caller"
+  },
+  {
+    "name": "extension_logs",
+    "permission": "admin",
+    "params": [
+      {
+        "name": "name",
+        "required": true
+      },
+      {
+        "name": "lines",
+        "required": false
+      }
+    ],
+    "about": "The last {lines} (default 100) lines of extension {name}'s log: its stderr and the core's notes, also while it is down"
+  },
+  {
+    "name": "extension_health",
+    "permission": "admin",
+    "params": [
+      {
+        "name": "name",
+        "required": true
+      }
+    ],
+    "about": "Ask extension {name} how it is doing now: {status: ok|degraded|failed|hung, detail}"
+  },
+  {
+    "name": "settings",
+    "permission": null,
+    "params": [],
+    "about": "The calling extension's settings, schema defaults filled in"
+  },
+  {
+    "name": "settings_set",
+    "permission": null,
+    "params": [
+      {
+        "name": "path",
+        "required": true
+      },
+      {
+        "name": "value",
+        "required": false
+      }
+    ],
+    "about": "Set {path, value} in the calling extension's settings (null deletes)"
+  },
+  {
+    "name": "config_list",
+    "permission": "config",
+    "params": [
+      {
+        "name": "prefix",
+        "required": false
+      }
+    ],
+    "about": "Every known setting under {prefix} (default all): [{path, description, type, default, value, secret}]; secrets masked"
+  },
+  {
+    "name": "config_get",
+    "permission": "config",
+    "params": [
+      {
+        "name": "path",
+        "required": true
+      }
+    ],
+    "about": "A setting of any unit at {path} (`august.model`, `extensions.web.settings`); secrets masked"
+  },
+  {
+    "name": "config_set",
+    "permission": "config",
+    "params": [
+      {
+        "name": "path",
+        "required": true
+      },
+      {
+        "name": "value",
+        "required": false
+      }
+    ],
+    "about": "Change the setting at {path} to {value} (null deletes); `enabled` and `origin` are the user's"
+  },
+  {
+    "name": "emit",
+    "permission": null,
+    "params": [
+      {
+        "name": "event",
+        "required": true
+      },
+      {
+        "name": "data",
+        "required": false
+      },
+      {
+        "name": "thread",
+        "required": false
+      },
+      {
+        "name": "depth",
+        "required": false
+      }
+    ],
+    "about": "Run your declared event {event, data} through its handlers; returns the data they leave (an observed event: at once)"
+  },
+  {
+    "name": "store_get",
+    "permission": null,
+    "params": [
+      {
+        "name": "key",
+        "required": true
+      }
+    ],
+    "about": "The caller's stored value at {key}"
+  },
+  {
+    "name": "store_set",
+    "permission": null,
+    "params": [
+      {
+        "name": "key",
+        "required": true
+      },
+      {
+        "name": "value",
+        "required": false
+      }
+    ],
+    "about": "Store {key, value} (null deletes)"
+  },
+  {
+    "name": "store_list",
+    "permission": null,
+    "params": [
+      {
+        "name": "prefix",
+        "required": false
+      }
+    ],
+    "about": "The caller's stored entries under {prefix}"
+  }
+]

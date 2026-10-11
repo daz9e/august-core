@@ -305,7 +305,11 @@ of cancelling it.
 
 Every call into August is an **operation** of one table (`src/gateway/ops.rs`). Slash
 commands, the agent's tools and `august config` use the same table; `ops` lists it with
-permissions. Calls are requests: `{"id", "method": "<operation>", "params": {...}}`.
+permissions and parameters, and `sdk/ops.json` holds the same list for SDKs and fakes.
+Calls are requests: `{"id", "method": "<operation>", "params": {...}}`. A call with a
+parameter its operation doesn't take, or without one it requires, fails
+(`` `send` takes no `msg` ``). Every operation also takes `as_user` and `from_turn`, and
+ignores a `thread` it doesn't use.
 
 ### 6.1 Common parameters and shapes
 
@@ -343,7 +347,7 @@ permissions. Calls are requests: `{"id", "method": "<operation>", "params": {...
 
 | Operation | Params | Result |
 |---|---|---|
-| `ops` | — | `[{name, permission, about}]` |
+| `ops` | — | `[{name, permission, params: [{name, required}], about}]` |
 | `tools` | — | `[{name, description, parameters, owner}]` |
 | `commands` | — | `[{name, description, owner}]` |
 | `status` | `thread?` | `{provider, model, workspace, busy}` (`busy`: whether a turn runs in `thread`, `null` without one) |

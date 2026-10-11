@@ -527,3 +527,22 @@ async fn a_monitor_reports_crashed_extensions_to_the_home_thread() {
     home.wait_for("monitor: fragile is failed (crashed)").await;
     home.wait_for("monitor: fragile is running").await;
 }
+
+/// `sdk/ops.json` is the core's table of operations as `ops` gives it: the SDKs and
+/// `FakeAugust` check calls against it. When the table changed, this rewrites the file.
+#[tokio::test]
+async fn the_sdk_has_the_cores_table_of_operations() {
+    let core = core().start().await;
+    let ops = core.call("ops", json!({})).await.unwrap();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sdk/ops.json");
+    let written = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok());
+    if written.as_ref() != Some(&ops) {
+        std::fs::write(&path, serde_json::to_string_pretty(&ops).unwrap() + "\n").unwrap();
+        panic!("sdk/ops.json was out of date and is rewritten now: commit it");
+    }
+    // A call the table doesn't allow fails.
+    let err = core.call("store_get", json!({"key": "k", "keys": "typo"})).await.unwrap_err();
+    assert!(err.to_string().contains("takes no `keys`"), "{err}");
+    let err = core.call("store_get", json!({})).await.unwrap_err();
+    assert!(err.to_string().contains("needs `key`"), "{err}");
+}

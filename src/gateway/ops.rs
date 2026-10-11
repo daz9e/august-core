@@ -16,11 +16,38 @@ pub struct Op {
     pub name: &'static str,
     /// What an extension must declare (`needs`) to call it; `None`: anyone may.
     pub permission: Option<&'static str>,
+    /// The parameters it takes, space-separated; `?` marks an optional one. Every operation
+    /// also takes `as_user` and `from_turn`, and ignores a `thread` it doesn't name.
+    pub params: &'static str,
     pub about: &'static str,
 }
 
-const fn op(name: &'static str, permission: Option<&'static str>, about: &'static str) -> Op {
-    Op { name, permission, about }
+const fn op(name: &'static str, permission: Option<&'static str>, params: &'static str, about: &'static str) -> Op {
+    Op { name, permission, params, about }
+}
+
+impl Op {
+    /// `[{name, required}]`.
+    fn params(&self) -> impl Iterator<Item = (&'static str, bool)> {
+        self.params.split_whitespace().map(|p| p.strip_suffix('?').map_or((p, true), |p| (p, false)))
+    }
+
+    pub fn to_json(&self) -> Value {
+        let params: Vec<Value> = self.params().map(|(name, required)| json!({"name": name, "required": required})).collect();
+        json!({"name": self.name, "permission": self.permission, "params": params, "about": self.about})
+    }
+
+    /// Fails on a parameter it doesn't take, or a required one missing.
+    fn check(&self, p: &Value) -> Result<()> {
+        let fields = p.as_object().into_iter().flatten();
+        if let Some((key, _)) = fields.filter(|(k, _)| !["as_user", "from_turn", "thread"].contains(&k.as_str())).find(|(k, _)| !self.params().any(|(n, _)| n == *k)) {
+            bail!("`{}` takes no `{key}` (it takes: {})", self.name, self.params);
+        }
+        if let Some((missing, _)) = self.params().find(|(n, required)| *required && p[*n].is_null()) {
+            bail!("`{}` needs `{missing}`", self.name);
+        }
+        Ok(())
+    }
 }
 
 const MESSAGING: Option<&str> = Some("messaging");
@@ -28,68 +55,68 @@ const TURNS: Option<&str> = Some("turns");
 const SESSIONS: Option<&str> = Some("sessions");
 
 pub const OPS: &[Op] = &[
-    op("ops", None, "Every operation with the permission it needs"),
-    op("tools", None, "Every agent tool: {name, description, parameters, owner}"),
-    op("commands", None, "Every slash command: {name, description, owner}"),
-    op("status", None, "{provider, model, workspace, busy} (busy: of `thread`, if given)"),
-    op("messengers", MESSAGING, "Every messenger with its capabilities, notes, actions and threads (each with its place: dm|group|channel|thread, parent, title)"),
-    op("send", MESSAGING, "Send {thread, message}; returns its id"),
-    op("edit", MESSAGING, "Replace a sent message {thread, id, message}"),
-    op("delete", MESSAGING, "Delete a sent message {thread, id}"),
-    op("react", MESSAGING, "React to a message {thread, id, emoji}"),
-    op("open_thread", MESSAGING, "Open a thread titled {title} inside {thread} (where the messenger can `open_thread`); returns the new thread"),
-    op("action", MESSAGING, "Run one of the messenger's described {action}s in {thread} with {args} (checked against its schema); returns its result"),
-    op("download", MESSAGING, "Save attachment {file} of a message in {thread} (one of `message_in`'s `files`) to {path} (relative: in the workspace); returns {path, size}"),
-    op("inbound", None, "Hand in what came to {thread} of a messenger you offer from {user: {id, name}} at {place: {kind: dm|group|channel|thread, parent, title}}: {kind: message|edited|command|press|reaction, ...}"),
-    op("listen", MESSAGING, "Listen in {thread} for {buttons, text}; returns a listener id. With {secret} a text taken is deleted from the chat"),
-    op("next", MESSAGING, "What {listener} took"),
-    op("prompt", MESSAGING, "Hand {thread} a message as if the user sent it"),
-    op("turn_start", TURNS, "Start a turn {thread, turn: {text, conversation: thread|copy|new, show, source, parent, ...}}; returns its id"),
-    op("turn_wait", TURNS, "A turn's outcome {id, timeout_ms}"),
-    op("turn_cancel", TURNS, "Cancel turn {id}"),
-    op("turns", TURNS, "Running turns, of {thread} or all"),
-    op("stop", TURNS, "Stop everything running in {thread}, like /stop"),
-    op("callTool", Some("tools"), "Run an agent tool {thread, name, input}"),
-    op("llm", Some("llm"), "One completion without tools: {prompt} or {messages}, {system}, {effort}, {options} (fields of the provider's request body); in {thread}'s conversation's model, counted in its usage"),
-    op("model_set", Some("models"), "Switch to {model} of the current provider, or `provider:model` (`provider:` for its default)"),
-    op("providers", Some("models"), "Every model provider: {id, label, default_model, extension}"),
-    op("models", Some("models"), "The models {provider} offers (default: the active one): [{id, context_window}]"),
-    op("accounts", Some("admin"), "Every account extensions sign in to: {id, label, extension, providers, kind: key|login, status: none|connected|expired, who}"),
-    op("login", Some("admin"), "Sign in to {account}, asking in {thread}; returns {who}"),
-    op("logout", Some("admin"), "Sign out of {account}"),
-    op("account_update", None, "Tell how your {account} stands: {status: none|connected|expired, who}"),
-    op("secret_get", None, "Your secret {key} (an account's API key is under the account's id)"),
-    op("secret_set", None, "Keep your secret {key, value} (null deletes)"),
-    op("login_ask", None, "In your sign-in {session}: ask for {label} ({secret}: deleted from the chat); returns the answer"),
-    op("login_choose", None, "In your sign-in {session}: {question} with {options} as buttons; returns the one picked"),
-    op("login_open", None, "In your sign-in {session}: show {url} to open, with {note}"),
-    op("login_progress", None, "In your sign-in {session}: say {text}"),
-    op("login_callback", None, "In your sign-in {session}: receive one redirect on localhost {port} (0: any) {path}; returns its address"),
-    op("login_wait", None, "In your sign-in {session}: the redirect's query {timeout_ms} (or the address the user pastes)"),
-    op("sessions", SESSIONS, "Stored conversations, newest first, of {thread} or all: {id, chat, name, settings, messages, bound}"),
-    op("session_new", SESSIONS, "Start a new conversation in {thread} (none: of no chat, addressed as thread {messenger: \"session\", id}), optionally with {name, settings}; returns its id"),
-    op("session_update", SESSIONS, "Rename {session} ({name}) or change its {settings}: {model, system, tools, sections}, null deletes"),
-    op("session_switch", SESSIONS, "Continue stored {session} in {thread}"),
-    op("history", SESSIONS, "The journal of {session} (or {thread}'s, or all): entries after {since} of {kinds}, at most {limit} (default 100)"),
-    op("journal_append", None, "Record {type, data} in the journal of {session} or {thread}'s (kind `custom`, caller you)"),
-    op("messages", SESSIONS, "The live conversation of {thread} (what the model sees next): {session, messages, tokens, window}"),
-    op("messages_set", SESSIONS, "Replace the live conversation of {thread} with {messages} (earlier ones stay searchable)"),
-    op("search", SESSIONS, "Full-text search over everything said in any conversation: {query, limit} → [{at, role, text}]"),
-    op("extensions", Some("admin"), "Every extension with its state and what it registers"),
-    op("extension_enable", Some("admin"), "(Re)start {name} and keep it enabled; returns its status line, fails with its error"),
-    op("extension_disable", Some("admin"), "Stop {name} and keep it disabled"),
-    op("extensions_reload", Some("admin"), "Restart every extension but the caller"),
-    op("extension_logs", Some("admin"), "The last {lines} (default 100) lines of extension {name}'s log: its stderr and the core's notes, also while it is down"),
-    op("extension_health", Some("admin"), "Ask extension {name} how it is doing now: {status: ok|degraded|failed|hung, detail}"),
-    op("settings", None, "The calling extension's settings, schema defaults filled in"),
-    op("settings_set", None, "Set {path, value} in the calling extension's settings (null deletes)"),
-    op("config_list", Some("config"), "Every known setting under {prefix} (default all): [{path, description, type, default, value, secret}]; secrets masked"),
-    op("config_get", Some("config"), "A setting of any unit at {path} (`august.model`, `extensions.web.settings`); secrets masked"),
-    op("config_set", Some("config"), "Change the setting at {path} to {value} (null deletes); `enabled` and `origin` are the user's"),
-    op("emit", None, "Run your declared event {event, data} through its handlers; returns the data they leave (an observed event: at once)"),
-    op("store_get", None, "The caller's stored value at {key}"),
-    op("store_set", None, "Store {key, value} (null deletes)"),
-    op("store_list", None, "The caller's stored entries under {prefix}"),
+    op("ops", None, "", "Every operation: {name, permission, params: [{name, required}], about}"),
+    op("tools", None, "", "Every agent tool: {name, description, parameters, owner}"),
+    op("commands", None, "", "Every slash command: {name, description, owner}"),
+    op("status", None, "thread?", "{provider, model, workspace, busy} (busy: of `thread`, if given)"),
+    op("messengers", MESSAGING, "", "Every messenger with its capabilities, notes, actions and threads (each with its place: dm|group|channel|thread, parent, title)"),
+    op("send", MESSAGING, "thread message", "Send {thread, message}; returns its id"),
+    op("edit", MESSAGING, "thread id message", "Replace a sent message {thread, id, message}"),
+    op("delete", MESSAGING, "thread id", "Delete a sent message {thread, id}"),
+    op("react", MESSAGING, "thread id emoji?", "React to a message {thread, id, emoji}"),
+    op("open_thread", MESSAGING, "thread title", "Open a thread titled {title} inside {thread} (where the messenger can `open_thread`); returns the new thread"),
+    op("action", MESSAGING, "thread action args?", "Run one of the messenger's described {action}s in {thread} with {args} (checked against its schema); returns its result"),
+    op("download", MESSAGING, "thread file path", "Save attachment {file} of a message in {thread} (one of `message_in`'s `files`) to {path} (relative: in the workspace); returns {path, size}"),
+    op("inbound", None, "thread user place? kind id? text? files? reply_to? addressed? name? args? button? message? emoji?", "Hand in what came to {thread} of a messenger you offer from {user: {id, name}} at {place: {kind: dm|group|channel|thread, parent, title}}: {kind: message|edited|command|press|reaction, ...}"),
+    op("listen", MESSAGING, "thread buttons? text? secret? ttl_ms?", "Listen in {thread} for {buttons, text}; returns a listener id. With {secret} a text taken is deleted from the chat"),
+    op("next", MESSAGING, "listener timeout_ms?", "What {listener} took"),
+    op("prompt", MESSAGING, "thread text source? deliver?", "Hand {thread} a message as if the user sent it"),
+    op("turn_start", TURNS, "thread turn", "Start a turn {thread, turn: {text, conversation: thread|copy|new, show, source, parent, ...}}; returns its id"),
+    op("turn_wait", TURNS, "id timeout_ms?", "A turn's outcome {id, timeout_ms}"),
+    op("turn_cancel", TURNS, "id", "Cancel turn {id}"),
+    op("turns", TURNS, "thread?", "Running turns, of {thread} or all"),
+    op("stop", TURNS, "thread", "Stop everything running in {thread}, like /stop"),
+    op("callTool", Some("tools"), "thread name input?", "Run an agent tool {thread, name, input}"),
+    op("llm", Some("llm"), "prompt? messages? system? effort? options? thread?", "One completion without tools: {prompt} or {messages}, {system}, {effort}, {options} (fields of the provider's request body); in {thread}'s conversation's model, counted in its usage"),
+    op("model_set", Some("models"), "model", "Switch to {model} of the current provider, or `provider:model` (`provider:` for its default)"),
+    op("providers", Some("models"), "", "Every model provider: {id, label, default_model, extension}"),
+    op("models", Some("models"), "provider?", "The models {provider} offers (default: the active one): [{id, context_window}]"),
+    op("accounts", Some("admin"), "", "Every account extensions sign in to: {id, label, extension, providers, kind: key|login, status: none|connected|expired, who}"),
+    op("login", Some("admin"), "account thread", "Sign in to {account}, asking in {thread}; returns {who}"),
+    op("logout", Some("admin"), "account", "Sign out of {account}"),
+    op("account_update", None, "account status who?", "Tell how your {account} stands: {status: none|connected|expired, who}"),
+    op("secret_get", None, "key", "Your secret {key} (an account's API key is under the account's id)"),
+    op("secret_set", None, "key value?", "Keep your secret {key, value} (null deletes)"),
+    op("login_ask", None, "session label secret?", "In your sign-in {session}: ask for {label} ({secret}: deleted from the chat); returns the answer"),
+    op("login_choose", None, "session question options", "In your sign-in {session}: {question} with {options} as buttons; returns the one picked"),
+    op("login_open", None, "session url note?", "In your sign-in {session}: show {url} to open, with {note}"),
+    op("login_progress", None, "session text", "In your sign-in {session}: say {text}"),
+    op("login_callback", None, "session port? path?", "In your sign-in {session}: receive one redirect on localhost {port} (0: any) {path}; returns its address"),
+    op("login_wait", None, "session timeout_ms?", "In your sign-in {session}: the redirect's query {timeout_ms} (or the address the user pastes)"),
+    op("sessions", SESSIONS, "thread?", "Stored conversations, newest first, of {thread} or all: {id, chat, name, settings, messages, bound}"),
+    op("session_new", SESSIONS, "thread? name? settings?", "Start a new conversation in {thread} (none: of no chat, addressed as thread {messenger: \"session\", id}), optionally with {name, settings}; returns its id"),
+    op("session_update", SESSIONS, "session name? settings?", "Rename {session} ({name}) or change its {settings}: {model, system, tools, sections}, null deletes"),
+    op("session_switch", SESSIONS, "thread session", "Continue stored {session} in {thread}"),
+    op("history", SESSIONS, "session? thread? kinds? since? limit?", "The journal of {session} (or {thread}'s, or all): entries after {since} of {kinds}, at most {limit} (default 100)"),
+    op("journal_append", None, "type data? session? thread?", "Record {type, data} in the journal of {session} or {thread}'s (kind `custom`, caller you)"),
+    op("messages", SESSIONS, "thread", "The live conversation of {thread} (what the model sees next): {session, messages, tokens, window}"),
+    op("messages_set", SESSIONS, "thread messages", "Replace the live conversation of {thread} with {messages} (earlier ones stay searchable)"),
+    op("search", SESSIONS, "query limit?", "Full-text search over everything said in any conversation: {query, limit} → [{at, role, text}]"),
+    op("extensions", Some("admin"), "", "Every extension with its state and what it registers"),
+    op("extension_enable", Some("admin"), "name", "(Re)start {name} and keep it enabled; returns its status line, fails with its error"),
+    op("extension_disable", Some("admin"), "name", "Stop {name} and keep it disabled"),
+    op("extensions_reload", Some("admin"), "", "Restart every extension but the caller"),
+    op("extension_logs", Some("admin"), "name lines?", "The last {lines} (default 100) lines of extension {name}'s log: its stderr and the core's notes, also while it is down"),
+    op("extension_health", Some("admin"), "name", "Ask extension {name} how it is doing now: {status: ok|degraded|failed|hung, detail}"),
+    op("settings", None, "", "The calling extension's settings, schema defaults filled in"),
+    op("settings_set", None, "path value?", "Set {path, value} in the calling extension's settings (null deletes)"),
+    op("config_list", Some("config"), "prefix?", "Every known setting under {prefix} (default all): [{path, description, type, default, value, secret}]; secrets masked"),
+    op("config_get", Some("config"), "path", "A setting of any unit at {path} (`august.model`, `extensions.web.settings`); secrets masked"),
+    op("config_set", Some("config"), "path value?", "Change the setting at {path} to {value} (null deletes); `enabled` and `origin` are the user's"),
+    op("emit", None, "event data? thread? depth?", "Run your declared event {event, data} through its handlers; returns the data they leave (an observed event: at once)"),
+    op("store_get", None, "key", "The caller's stored value at {key}"),
+    op("store_set", None, "key value?", "Store {key, value} (null deletes)"),
+    op("store_list", None, "prefix?", "The caller's stored entries under {prefix}"),
 ];
 
 pub fn find(name: &str) -> Option<&'static Op> {
@@ -128,6 +155,7 @@ impl Gateway {
     /// with `as_user` (a slash command, say) it acts for the user.
     pub(crate) async fn op(self: &Arc<Self>, ext: &str, name: &str, p: &Value) -> Result<Value> {
         // As hooks and the journal show who did something.
+        find(name).ok_or_else(|| anyhow!("unknown operation `{name}`"))?.check(p)?;
         let caller = if p["as_user"] == true { "user".to_string() } else { format!("ext:{ext}") };
         // `"thread": "home"` is the user's home thread.
         let home;
@@ -141,7 +169,7 @@ impl Gateway {
         let arg = |k: &str| p[k].as_str().ok_or_else(|| anyhow!("missing string `{k}`"));
         let ms = |k: &str, default: u64| Duration::from_millis(p[k].as_u64().unwrap_or(default));
         Ok(match name {
-            "ops" => Value::Array(OPS.iter().map(|o| json!({"name": o.name, "permission": o.permission, "about": o.about})).collect()),
+            "ops" => Value::Array(OPS.iter().map(Op::to_json).collect()),
             "tools" => json!(self.tool_list()),
             "commands" => Value::Array(self.command_list().into_iter().map(|(c, owner)| json!({"name": c.name, "description": c.description, "owner": owner})).collect()),
             "status" => {
