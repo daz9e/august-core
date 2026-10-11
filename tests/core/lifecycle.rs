@@ -202,8 +202,8 @@ fn guard(seen: Arc<Mutex<Vec<String>>>) -> impl Fn(&August) + Send + Sync + 'sta
             }
         });
         a.on("extension_ready", |d, _| async move {
-            let needs: Vec<Value> = d["manifest"]["needs"].as_array().unwrap().iter().filter(|n| *n != "admin").cloned().collect();
-            Ok((d["name"] == "weather").then(|| json!({"needs": needs})))
+            // At most messaging, and only in telegram.
+            Ok((d["name"] == "weather").then(|| json!({"needs": ["messaging:telegram", "sessions"]})))
         });
         let s = seen.clone();
         a.on("extension_output", move |d, _| {
@@ -219,7 +219,7 @@ fn guard(seen: Arc<Mutex<Vec<String>>>) -> impl Fn(&August) + Send + Sync + 'sta
 #[tokio::test]
 async fn hooks_watch_extensions_launch_and_can_block_change_or_limit_them() {
     let seen: Arc<Mutex<Vec<String>>> = Arc::default();
-    let greedy = format!("echo greedy says hi >&2; echo \"$GREETING\" > \"$AUGUST_WORKSPACE/greeting.txt\"; {}", ready_script(json!({"needs": ["admin"]})));
+    let greedy = format!("echo greedy says hi >&2; echo \"$GREETING\" > \"$AUGUST_WORKSPACE/greeting.txt\"; {}", ready_script(json!({"needs": ["admin", "messaging"]})));
     let mut core = core().ext("guard", guard(seen.clone())).sh("weather", &greedy).sh("evil", "echo should never run > ran.txt").start().await;
     let has = |what: &str| seen.lock().unwrap().iter().any(|e| e.contains(what));
 
@@ -228,7 +228,7 @@ async fn hooks_watch_extensions_launch_and_can_block_change_or_limit_them() {
     assert_eq!(evil["error"], "launch blocked: not on my watch");
     assert!(!core.path("extensions/evil/ran.txt").exists());
     assert_eq!(std::fs::read_to_string(core.workspace.join("greeting.txt")).unwrap().trim(), "from the guard");
-    assert_eq!(core.extension("weather").await["needs"], json!([]));
+    assert_eq!(core.extension("weather").await["needs"], json!(["messaging:telegram"]));
 
     // It saw why each one started: new ones, then a plain start, then a change.
     assert!(has("weather (install, 1 changed)"), "{:?}", seen.lock().unwrap());

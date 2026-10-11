@@ -308,6 +308,43 @@ async fn extensions_only_get_what_they_declare() {
 }
 
 #[tokio::test]
+async fn a_scoped_permission_reaches_only_what_it_names() {
+    let core = core()
+        .ext("scoped", |a| {
+            a.needs(&["messaging:test", "config:extensions.scoped"]);
+            let me = a.clone();
+            a.register_command("try", "", move |what, _| {
+                let me = me.clone();
+                async move {
+                    let (op, params) = match what.as_str() {
+                        "here" => ("send", json!({"thread": {"messenger": "test", "id": "2"}, "message": "hi 2"})),
+                        "there" => ("send", json!({"thread": {"messenger": "other", "id": "2"}, "message": "hi"})),
+                        "home" => ("send", json!({"thread": "home", "message": "hi"})),
+                        "mine" => ("config_set", json!({"path": "extensions.scoped.settings.x", "value": 1})),
+                        "theirs" => ("config_get", json!({"path": "august.model"})),
+                        _ => ("messengers", json!({})),
+                    };
+                    Ok(Some(match me.call(op, params).await {
+                        Ok(_) => format!("{what}: ok"),
+                        Err(e) => format!("{what}: {e}"),
+                    }))
+                }
+            });
+        })
+        .start()
+        .await;
+    let chat = core.chat("1");
+    chat.ask("/try here", "here: ok").await;
+    core.chat("2").wait_for("hi 2").await;
+    chat.ask("/try list", "list: ok").await;
+    chat.ask("/try mine", "mine: ok").await;
+    for what in ["there", "home", "theirs"] {
+        let refused = chat.ask(&format!("/try {what}"), &format!("{what}:")).await;
+        assert!(refused.contains("permission"), "{refused}");
+    }
+}
+
+#[tokio::test]
 async fn extensions_hear_cancels_and_shutdowns_and_set_hook_timeouts() {
     let (aborted, shut) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
     let (a1, s1) = (aborted.clone(), shut.clone());

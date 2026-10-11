@@ -177,9 +177,64 @@ impl Drop for Host {
 /// `m` with its needs cut down to `limit`.
 fn limited(mut m: Manifest, limit: &RwLock<Option<Vec<String>>>) -> Manifest {
     if let Some(l) = &*limit.read().unwrap() {
-        m.needs.retain(|n| l.contains(n));
+        m.needs = narrow(&m.needs, l);
     }
     m
+}
+
+/// A permission split into its name and scope: `messaging:telegram` → (`messaging`, `telegram`).
+fn split(need: &str) -> (&str, Option<&str>) {
+    need.split_once(':').map_or((need, None), |(n, s)| (n, Some(s)))
+}
+
+/// Whether scope `inner` lies within `outer` (`a.b` within `a`); `None` is everything.
+fn within(inner: Option<&str>, outer: Option<&str>) -> bool {
+    match (inner, outer) {
+        (_, None) => true,
+        (None, Some(_)) => false,
+        (Some(i), Some(o)) => i == o || i.strip_prefix(o).is_some_and(|r| r.starts_with('.')),
+    }
+}
+
+/// What of `needs` stays within `limit`: each need, cut to the scopes `limit` allows of it.
+fn narrow(needs: &[String], limit: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for need in needs {
+        let (name, scope) = split(need);
+        for l in limit.iter().filter(|l| split(l).0 == name) {
+            let kept = if within(scope, split(l).1) { need } else if within(split(l).1, scope) { l } else { continue };
+            if !out.contains(kept) {
+                out.push(kept.clone());
+            }
+        }
+    }
+    out
+}
+
+/// The parameters a scoped permission is checked against, by permission: a call's object
+/// must lie within the scope (`messaging:telegram`: threads of `telegram`).
+const SCOPED: &[(&str, &[&str])] = &[("messaging", &["thread"]), ("config", &["path", "prefix"])];
+
+/// Whether `need` (maybe scoped) lets `op` run with `params`.
+fn covers(need: &str, op: &ops::Op, params: &Value) -> bool {
+    let (name, scope) = split(need);
+    if Some(name) != op.permission {
+        return false;
+    }
+    let Some(scope) = scope else { return true };
+    let keys = SCOPED.iter().find(|(n, _)| *n == name).map_or(&[][..], |(_, k)| *k);
+    let takes: Vec<&str> = keys.iter().copied().filter(|k| op.params.split_whitespace().any(|p| p.trim_end_matches('?') == *k)).collect();
+    // An operation with no object of that kind (`next`, `messengers`) is covered.
+    if takes.is_empty() {
+        return !keys.is_empty();
+    }
+    takes.iter().any(|k| {
+        let target = match &params[*k] {
+            Value::Object(t) => t.get("messenger").and_then(Value::as_str),
+            v => v.as_str(),
+        };
+        target.is_some_and(|t| within(Some(t), Some(scope)))
+    })
 }
 
 async fn write_line(stdin: &Mutex<Box<dyn AsyncWrite + Send + Unpin>>, msg: &Value) -> std::io::Result<()> {
@@ -436,7 +491,9 @@ impl Host {
 
     /// From now on it has at most these permissions, whatever it declares.
     pub fn limit_needs(&self, needs: Vec<String>) {
-        self.manifest.write().unwrap().needs.retain(|n| needs.contains(n));
+        let mut m = self.manifest.write().unwrap();
+        m.needs = narrow(&m.needs, &needs);
+        drop(m);
         *self.limit.write().unwrap() = Some(needs);
     }
 
@@ -531,15 +588,16 @@ impl Drop for CancelOnDrop {
 }
 
 /// Whether the extension may make this call: the operation's permission (from the core's
-/// table) must be among what it declared it needs, and `user` to act for the user. Answering in the thread of a call in
-/// progress needs no `messaging`.
+/// table) must be among what it declared it needs, whole or scoped to what the call is about,
+/// and `user` to act for the user. Answering in the thread of a call in progress needs no
+/// `messaging`.
 fn allowed(manifest: &RwLock<Manifest>, busy: &Busy, method: &str, params: &Value) -> anyhow::Result<()> {
     let Some(op) = ops::find(method) else { anyhow::bail!("unknown method {method}") };
     if params["as_user"] == true && !manifest.read().unwrap().needs.iter().any(|n| n == "user") {
         anyhow::bail!("acting for the user (`as_user`) needs the `user` permission: declare it with august.needs(\"user\")");
     }
     let Some(need) = op.permission else { return Ok(()) };
-    if manifest.read().unwrap().needs.iter().any(|n| n == need) {
+    if manifest.read().unwrap().needs.iter().any(|n| covers(n, op, params)) {
         return Ok(());
     }
     let own_thread = need == "messaging" && ops::thread(params).is_ok_and(|t| busy.lock().unwrap().contains_key(&t));

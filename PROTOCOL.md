@@ -221,6 +221,17 @@ its `needs` lists that permission; otherwise the call fails with
 | `admin` | `extensions`, `extension_enable`, `extension_disable`, `extensions_reload`, `extension_logs`, `extension_health`, `accounts`, `login`, `logout`; and hooking `extension_launch`, `extension_ready`, `extension_exit`, `extension_output` |
 | `user` | `as_user: true` on any call: it counts as the user's (§6) |
 
+**Scopes**: `messaging` and `config` may be declared for part of what they grant, as
+`<permission>:<scope>`:
+
+| Permission | Scope | Covers |
+|---|---|---|
+| `messaging:<messenger>` | a messenger's id | calls whose `thread` is in that messenger, and `messengers` and `next`, which name no thread |
+| `config:<path>` | a settings path | calls whose `path` or `prefix` is that path or under it (`config:extensions.web` covers `extensions.web.settings.key`) |
+
+A call that doesn't name what it is about (`"thread": "home"`, `config_list` without a
+`prefix`) needs the whole permission. A scope on any other permission covers nothing.
+
 Rules:
 
 - **Your own thread is free.** A `messaging` operation needs no permission when its `thread`
@@ -551,7 +562,7 @@ All of these carry `ctx.turn`.
 | Event | Who gets it | Data | A handler may return |
 |---|---|---|---|
 | `extension_launch` | `admin` | `{name, dir, command, env, reason, changed: [path]}` | `command`, `env` (start it otherwise: a sandbox, secrets in the environment); `block` |
-| `extension_ready` | `admin` | `{name, reason, changed, manifest}` | `block`; `needs` (the most it may have) |
+| `extension_ready` | `admin` | `{name, reason, changed, manifest}` | `block`; `needs` (the most it may have; `messaging:telegram` narrows a declared `messaging` to that scope) |
 | `extension_exit` | `admin` | `{name, reason: "exit"\|"hang"\|"unhealthy"\|"start", code, error, restarts, uptime_ms}` | `restart: false` (keep it down), `delay_ms` |
 | `extension_output` *(observe)* | `admin` | `{name, line}`, every line of its stderr | — |
 | `extension_state` *(observe)* | anyone | `{name, state, reason, error, detail, restarts, final}` | — |
